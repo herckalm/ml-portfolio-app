@@ -1,0 +1,45 @@
+# Python / FastAPI
+__pycache__/
+*.py[cod]
+.venv/
+.uv/
+*.egg-info/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# .NET / C#
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.nupkg
+TestResults/
+
+# Node / React
+node_modules/
+dist/
+build/
+.env.local
+.env.*.local
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# ML artifacts
+*.pkl
+*.joblib
+*.pt
+*.pth
+*.onnx
+models/
+
+# OS
+.DS_Store
+Thumbs.db
