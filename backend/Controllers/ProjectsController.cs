@@ -1,8 +1,9 @@
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using MlPortfolio.Api.DTOs;
 using MlPortfolio.Api.Domain.Entities;
 using MlPortfolio.Api.Infrastructure.Data;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace MlPortfolio.Api.Controllers;
 
@@ -39,6 +40,7 @@ public class ProjectsController : ControllerBase
     }
 
     // POST /api/projects
+    [Authorize]
     [HttpPost]
     public async Task<ActionResult<ProjectResponseDto>> Create(CreateProjectDto dto)
     {
@@ -46,6 +48,7 @@ public class ProjectsController : ControllerBase
         {
             Title = dto.Title,
             Description = dto.Description,
+            Domain = dto.Domain,
             ModelType = dto.ModelType,
             CreatedAt = DateTime.UtcNow
         };
@@ -57,6 +60,7 @@ public class ProjectsController : ControllerBase
     }
 
     // PUT /api/projects/{id}
+    [Authorize]
     [HttpPut("{id:int}")]
     public async Task<ActionResult<ProjectResponseDto>> Update(int id, UpdateProjectDto dto)
     {
@@ -65,6 +69,7 @@ public class ProjectsController : ControllerBase
 
         project.Title = dto.Title;
         project.Description = dto.Description;
+        project.Domain = dto.Domain;
         project.ModelType = dto.ModelType;
 
         await _db.SaveChangesAsync();
@@ -72,6 +77,7 @@ public class ProjectsController : ControllerBase
     }
 
     // DELETE /api/projects/{id}
+    [Authorize]
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id)
     {
@@ -83,12 +89,12 @@ public class ProjectsController : ControllerBase
         return NoContent();
     }
 
-    // Private mapping — keeps controllers lean
     private static ProjectResponseDto ToDto(Project p) => new()
     {
         Id = p.Id,
         Title = p.Title,
         Description = p.Description,
+        Domain = p.Domain,
         ModelType = p.ModelType ?? string.Empty,
         CreatedAt = p.CreatedAt
     };
