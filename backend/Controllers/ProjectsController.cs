@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -18,7 +19,7 @@ public class ProjectsController : ControllerBase
         _db = db;
     }
 
-    // GET /api/projects
+    // GET /api/projects — public
     [HttpGet]
     public async Task<ActionResult<IEnumerable<ProjectResponseDto>>> GetAll()
     {
@@ -30,7 +31,7 @@ public class ProjectsController : ControllerBase
         return Ok(projects);
     }
 
-    // GET /api/projects/{id}
+    // GET /api/projects/{id} — public
     [HttpGet("{id:int}")]
     public async Task<ActionResult<ProjectResponseDto>> GetById(int id)
     {
@@ -39,18 +40,22 @@ public class ProjectsController : ControllerBase
         return Ok(ToDto(project));
     }
 
-    // POST /api/projects
+    // POST /api/projects — authenticated, stamps OwnerId from JWT
     [Authorize]
     [HttpPost]
     public async Task<ActionResult<ProjectResponseDto>> Create(CreateProjectDto dto)
     {
+        // extract userId from JWT claim
+        var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
         var project = new Project
         {
             Title = dto.Title,
             Description = dto.Description,
             Domain = dto.Domain,
             ModelType = dto.ModelType,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            OwnerId = userId  // stamp ownership
         };
 
         _db.Projects.Add(project);
@@ -59,13 +64,18 @@ public class ProjectsController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = project.Id }, ToDto(project));
     }
 
-    // PUT /api/projects/{id}
+    // PUT /api/projects/{id} — owner only
     [Authorize]
     [HttpPut("{id:int}")]
     public async Task<ActionResult<ProjectResponseDto>> Update(int id, UpdateProjectDto dto)
     {
+        var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!); 
+
         var project = await _db.Projects.FindAsync(id);
         if (project is null) return NotFound();
+
+        // 403 if not owner
+        if (project.OwnerId != userId) return Forbid();
 
         project.Title = dto.Title;
         project.Description = dto.Description;
@@ -76,13 +86,18 @@ public class ProjectsController : ControllerBase
         return Ok(ToDto(project));
     }
 
-    // DELETE /api/projects/{id}
+    // DELETE /api/projects/{id} — owner only
     [Authorize]
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id)
     {
+        var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!); 
+
         var project = await _db.Projects.FindAsync(id);
         if (project is null) return NotFound();
+
+        // 403 if not owner
+        if (project.OwnerId != userId) return Forbid();
 
         _db.Projects.Remove(project);
         await _db.SaveChangesAsync();
@@ -96,6 +111,7 @@ public class ProjectsController : ControllerBase
         Description = p.Description,
         Domain = p.Domain,
         ModelType = p.ModelType ?? string.Empty,
-        CreatedAt = p.CreatedAt
+        CreatedAt = p.CreatedAt,
+        OwnerId = p.OwnerId  
     };
 }
