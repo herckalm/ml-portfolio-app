@@ -48,6 +48,8 @@ if (string.IsNullOrWhiteSpace(jwtOptions.Audience))
     throw new InvalidOperationException("Jwt:Audience is not configured.");
 
 builder.Services.AddScoped<JwtService>();
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
