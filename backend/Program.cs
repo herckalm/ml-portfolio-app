@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using MlPortfolio.Api.Configuration;
 using MlPortfolio.Api.Infrastructure.Data;
 using MlPortfolio.Api.Repositories;
 using MlPortfolio.Api.Services;
@@ -28,13 +29,23 @@ builder.Services.AddCors(options =>
               .AllowAnyHeader());
 });
 
-// JWT — fail fast if any config key is missing
-var jwtSecret = builder.Configuration["Jwt:Secret"]
-    ?? throw new InvalidOperationException("Jwt:Secret is not configured.");
-var jwtIssuer = builder.Configuration["Jwt:Issuer"]
-    ?? throw new InvalidOperationException("Jwt:Issuer is not configured.");
-var jwtAudience = builder.Configuration["Jwt:Audience"]
-    ?? throw new InvalidOperationException("Jwt:Audience is not configured.");
+// JWT — bind and validate options at startup
+builder.Services.AddOptions<JwtOptions>()
+    .BindConfiguration(JwtOptions.SectionName)
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+var jwtOptions = builder.Configuration
+    .GetSection(JwtOptions.SectionName)
+    .Get<JwtOptions>()
+    ?? throw new InvalidOperationException("Jwt configuration section is missing.");
+
+if (string.IsNullOrWhiteSpace(jwtOptions.Secret))
+    throw new InvalidOperationException("Jwt:Secret is not configured.");
+if (string.IsNullOrWhiteSpace(jwtOptions.Issuer))
+    throw new InvalidOperationException("Jwt:Issuer is not configured.");
+if (string.IsNullOrWhiteSpace(jwtOptions.Audience))
+    throw new InvalidOperationException("Jwt:Audience is not configured.");
 
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
@@ -48,10 +59,10 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = jwtIssuer,
-            ValidAudience = jwtAudience,
+            ValidIssuer = jwtOptions.Issuer,
+            ValidAudience = jwtOptions.Audience,
             IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(jwtSecret))
+                Encoding.UTF8.GetBytes(jwtOptions.Secret))
         };
     });
 builder.Services.AddAuthorization();
