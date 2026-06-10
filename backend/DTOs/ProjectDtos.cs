@@ -40,4 +40,7 @@ public class ProjectResponseDto
     public string Domain { get; set; } = string.Empty;
     public string ModelType { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
+
+    // expose who owns the project
+    public int OwnerId { get; set; }
 }

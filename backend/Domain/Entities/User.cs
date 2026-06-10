@@ -7,4 +7,7 @@ public class User
     public string PasswordHash { get; set; } = string.Empty;
     public string Role { get; set; } = "user";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    // navigation property for owned projects
+    public ICollection<Project> Projects { get; set; } = new List<Project>();
 }
