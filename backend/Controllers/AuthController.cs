@@ -1,8 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using MlPortfolio.Api.DTOs;
-using MlPortfolio.Api.Domain.Entities;
-using MlPortfolio.Api.Infrastructure.Data;
 using MlPortfolio.Api.Services;
 
 namespace MlPortfolio.Api.Controllers;
@@ -11,43 +8,33 @@ namespace MlPortfolio.Api.Controllers;
 [Route("api/auth")]
 public class AuthController : ControllerBase
 {
-    private readonly AppDbContext _db;
-    private readonly JwtService _jwt;
+    private readonly IAuthService _authService;
 
-    public AuthController(AppDbContext db, JwtService jwt)
+    public AuthController(IAuthService authService)
     {
-        _db = db;
-        _jwt = jwt;
+        _authService = authService;
     }
 
     [HttpPost("register")]
     public async Task<IActionResult> Register(RegisterRequest req)
     {
-        if (await _db.Users.AnyAsync(u => u.Email == req.Email))
-            return Conflict(new { message = "Email already registered." });
-
-        var user = new User
+        try
         {
-            Email = req.Email,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password)
-        };
-
-        _db.Users.Add(user);
-        await _db.SaveChangesAsync();
-
-        var token = _jwt.GenerateToken(user);
-        return Ok(new AuthResponse(token, user.Email, user.Role));
+            var response = await _authService.RegisterAsync(req);
+            return Ok(response);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
     }
 
     [HttpPost("login")]
     public async Task<IActionResult> Login(LoginRequest req)
     {
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.Email == req.Email);
-
-        if (user is null || !BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
+        var response = await _authService.LoginAsync(req);
+        if (response is null)
             return Unauthorized(new { message = "Invalid credentials." });
-
-        var token = _jwt.GenerateToken(user);
-        return Ok(new AuthResponse(token, user.Email, user.Role));
+        return Ok(response);
     }
 }
