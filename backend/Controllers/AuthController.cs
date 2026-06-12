@@ -16,25 +16,16 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("register")]
-    public async Task<IActionResult> Register(RegisterRequest req)
+    public async Task<ActionResult<AuthResponse>> Register(RegisterRequest req)
     {
-        try
-        {
-            var response = await _authService.RegisterAsync(req);
-            return Ok(response);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new { message = ex.Message });
-        }
+        var response = await _authService.RegisterAsync(req);
+        return Ok(response);
     }
 
     [HttpPost("login")]
-    public async Task<IActionResult> Login(LoginRequest req)
+    public async Task<ActionResult<AuthResponse>> Login(LoginRequest req)
     {
         var response = await _authService.LoginAsync(req);
-        if (response is null)
-            return Unauthorized(new { message = "Invalid credentials." });
         return Ok(response);
     }
 }
