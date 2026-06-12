@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using MlPortfolio.Api.Configuration;
 using MlPortfolio.Api.Infrastructure.Data;
+using MlPortfolio.Api.Middleware;
 using MlPortfolio.Api.Repositories;
 using MlPortfolio.Api.Services;
 
@@ -13,6 +14,10 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// Error envelope — every error response is RFC 7807 ProblemDetails
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
 // EF Core + PostgreSQL
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
@@ -71,7 +76,9 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
-// Middleware
+// Middleware — exception handler first so it catches everything downstream
+app.UseExceptionHandler();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();

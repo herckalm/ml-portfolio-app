@@ -30,7 +30,6 @@ public class ProjectsController : ControllerBase
     public async Task<ActionResult<ProjectResponseDto>> GetById(int id)
     {
         var project = await _service.GetByIdAsync(id);
-        if (project is null) return NotFound();
         return Ok(project);
     }
 
@@ -50,16 +49,8 @@ public class ProjectsController : ControllerBase
     public async Task<ActionResult<ProjectResponseDto>> Update(int id, UpdateProjectDto dto)
     {
         var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-        try
-        {
-            var updated = await _service.UpdateAsync(id, dto, userId);
-            if (updated is null) return NotFound();
-            return Ok(updated);
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return Forbid();
-        }
+        var updated = await _service.UpdateAsync(id, dto, userId);
+        return Ok(updated);
     }
 
     // DELETE /api/projects/{id} — owner only
@@ -68,15 +59,7 @@ public class ProjectsController : ControllerBase
     public async Task<IActionResult> Delete(int id)
     {
         var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-        try
-        {
-            var deleted = await _service.DeleteAsync(id, userId);
-            if (!deleted) return NotFound();
-            return NoContent();
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return Forbid();
-        }
+        await _service.DeleteAsync(id, userId);
+        return NoContent();
     }
 }
