@@ -1,5 +1,6 @@
 using MlPortfolio.Api.Domain.Entities;
 using MlPortfolio.Api.DTOs;
+using MlPortfolio.Api.Exceptions;
 using MlPortfolio.Api.Repositories;
 
 namespace MlPortfolio.Api.Services;
@@ -18,7 +19,7 @@ public class AuthService : IAuthService
     public async Task<AuthResponse> RegisterAsync(RegisterRequest req)
     {
         if (await _repo.ExistsByEmailAsync(req.Email))
-            throw new InvalidOperationException("Email already registered.");
+            throw new ConflictException("Email already registered.");
 
         var user = new User
         {
@@ -31,12 +32,12 @@ public class AuthService : IAuthService
         return new AuthResponse(token, created.Email, created.Role);
     }
 
-    public async Task<AuthResponse?> LoginAsync(LoginRequest req)
+    public async Task<AuthResponse> LoginAsync(LoginRequest req)
     {
         var user = await _repo.GetByEmailAsync(req.Email);
 
         if (user is null || !BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
-            return null;
+            throw new UnauthorizedAccessException("Invalid credentials.");
 
         var token = _jwt.GenerateToken(user);
         return new AuthResponse(token, user.Email, user.Role);

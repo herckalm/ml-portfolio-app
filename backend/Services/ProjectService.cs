@@ -1,5 +1,6 @@
 using MlPortfolio.Api.Domain.Entities;
 using MlPortfolio.Api.DTOs;
+using MlPortfolio.Api.Exceptions;
 using MlPortfolio.Api.Repositories;
 
 namespace MlPortfolio.Api.Services;
@@ -19,10 +20,11 @@ public class ProjectService : IProjectService
         return projects.Select(ToDto);
     }
 
-    public async Task<ProjectResponseDto?> GetByIdAsync(int id)
+    public async Task<ProjectResponseDto> GetByIdAsync(int id)
     {
-        var project = await _repo.GetByIdAsync(id);
-        return project is null ? null : ToDto(project);
+        var project = await _repo.GetByIdAsync(id)
+            ?? throw new NotFoundException($"Project with id {id} was not found.");
+        return ToDto(project);
     }
 
     public async Task<ProjectResponseDto> CreateAsync(CreateProjectDto dto, int ownerId)
@@ -41,14 +43,14 @@ public class ProjectService : IProjectService
         return ToDto(created);
     }
 
-    public async Task<ProjectResponseDto?> UpdateAsync(int id, UpdateProjectDto dto, int requestingUserId)
+    public async Task<ProjectResponseDto> UpdateAsync(int id, UpdateProjectDto dto, int requestingUserId)
     {
-        var project = await _repo.GetByIdAsync(id);
-        if (project is null) return null;
+        var project = await _repo.GetByIdAsync(id)
+            ?? throw new NotFoundException($"Project with id {id} was not found.");
 
         // ownership check lives in the service layer
         if (project.OwnerId != requestingUserId)
-            throw new UnauthorizedAccessException("You do not own this project.");
+            throw new ForbiddenAccessException("You do not own this project.");
 
         project.Title = dto.Title;
         project.Description = dto.Description;
@@ -59,17 +61,16 @@ public class ProjectService : IProjectService
         return ToDto(updated);
     }
 
-    public async Task<bool> DeleteAsync(int id, int requestingUserId)
+    public async Task DeleteAsync(int id, int requestingUserId)
     {
-        var project = await _repo.GetByIdAsync(id);
-        if (project is null) return false;
+        var project = await _repo.GetByIdAsync(id)
+            ?? throw new NotFoundException($"Project with id {id} was not found.");
 
         // ownership check lives in the service layer
         if (project.OwnerId != requestingUserId)
-            throw new UnauthorizedAccessException("You do not own this project.");
+            throw new ForbiddenAccessException("You do not own this project.");
 
         await _repo.DeleteAsync(project);
-        return true;
     }
 
     private static ProjectResponseDto ToDto(Project p) => new()
