@@ -44,3 +44,5 @@ models/
 .DS_Store
 Thumbs.db
 .env
+
+.claude

@@ -13,11 +13,14 @@ public class ProjectRepository : IProjectRepository
         _db = db;
     }
 
-    public async Task<IEnumerable<Project>> GetAllAsync()
+    public async Task<(IEnumerable<Project> Items, int Total)> GetAllAsync(int skip, int take)
     {
-        return await _db.Projects
-            .OrderByDescending(p => p.CreatedAt)
-            .ToListAsync();
+        var query = _db.Projects.AsNoTracking().OrderByDescending(p => p.CreatedAt);
+
+        var total = await query.CountAsync();
+        var items = await query.Skip(skip).Take(take).ToListAsync();
+
+        return (items, total);
     }
 
     public async Task<Project?> GetByIdAsync(int id)
