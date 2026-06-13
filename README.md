@@ -19,7 +19,7 @@
 
 | Folder       | Stack                          | Port |
 |--------------|--------------------------------|------|
-| `/backend`   | ASP.NET Core 10, EF Core, JWT  | 5000 |
+| `/backend`   | ASP.NET Core 10, EF Core, JWT  | 5013 |
 | `/ml-service`| FastAPI, uv, PyTorch           | 8000 |
 | `/frontend`  | React, Vite, TypeScript        | 5173 |
 
