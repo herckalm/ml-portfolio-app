@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MlPortfolio.Api.DTOs;
+using MlPortfolio.Api.DTOs.Common;
 using MlPortfolio.Api.Services;
 
 namespace MlPortfolio.Api.Controllers;
@@ -17,12 +18,12 @@ public class ProjectsController : ControllerBase
         _service = service;
     }
 
-    // GET /api/projects — public
+    // GET /api/projects?page=1&pageSize=10 — public
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<ProjectResponseDto>>> GetAll()
+    public async Task<ActionResult<PagedResult<ProjectResponseDto>>> GetAll([FromQuery] PaginationQuery query)
     {
-        var projects = await _service.GetAllAsync();
-        return Ok(projects);
+        var result = await _service.GetAllAsync(query);
+        return Ok(result);
     }
 
     // GET /api/projects/{id} — public

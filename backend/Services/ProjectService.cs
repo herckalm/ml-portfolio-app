@@ -1,5 +1,6 @@
 using MlPortfolio.Api.Domain.Entities;
 using MlPortfolio.Api.DTOs;
+using MlPortfolio.Api.DTOs.Common;
 using MlPortfolio.Api.Exceptions;
 using MlPortfolio.Api.Repositories;
 
@@ -14,10 +15,18 @@ public class ProjectService : IProjectService
         _repo = repo;
     }
 
-    public async Task<IEnumerable<ProjectResponseDto>> GetAllAsync()
+    public async Task<PagedResult<ProjectResponseDto>> GetAllAsync(PaginationQuery query)
     {
-        var projects = await _repo.GetAllAsync();
-        return projects.Select(ToDto);
+        var skip = (query.Page - 1) * query.PageSize;
+        var (items, total) = await _repo.GetAllAsync(skip, query.PageSize);
+
+        return new PagedResult<ProjectResponseDto>
+        {
+            Items = items.Select(ToDto),
+            Total = total,
+            Page = query.Page,
+            PageSize = query.PageSize
+        };
     }
 
     public async Task<ProjectResponseDto> GetByIdAsync(int id)
@@ -48,7 +57,6 @@ public class ProjectService : IProjectService
         var project = await _repo.GetByIdAsync(id)
             ?? throw new NotFoundException($"Project with id {id} was not found.");
 
-        // ownership check lives in the service layer
         if (project.OwnerId != requestingUserId)
             throw new ForbiddenAccessException("You do not own this project.");
 
@@ -66,7 +74,6 @@ public class ProjectService : IProjectService
         var project = await _repo.GetByIdAsync(id)
             ?? throw new NotFoundException($"Project with id {id} was not found.");
 
-        // ownership check lives in the service layer
         if (project.OwnerId != requestingUserId)
             throw new ForbiddenAccessException("You do not own this project.");
 
