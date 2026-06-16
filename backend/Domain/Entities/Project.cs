@@ -10,7 +10,9 @@ public class Project
     public string? ModelType { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    // ownership foreign key + navigation
     public int OwnerId { get; set; }
     public User Owner { get; set; } = null!;
+
+    // visibility gate (false = draft, owner-only; true = public on /u/{handle})
+    public bool IsPublished { get; set; } = false;
 }
