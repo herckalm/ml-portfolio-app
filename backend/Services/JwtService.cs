@@ -1,25 +1,25 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using MlPortfolio.Api.Configuration;
 using MlPortfolio.Api.Domain.Entities;
 
 namespace MlPortfolio.Api.Services;
 
 public class JwtService
 {
-    private readonly IConfiguration _config;
+    private readonly JwtOptions _opts;
 
-    public JwtService(IConfiguration config)
+    public JwtService(IOptions<JwtOptions> opts)
     {
-        _config = config;
+        _opts = opts.Value;
     }
 
     public string GenerateToken(User user)
     {
-        var key = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes(_config["Jwt:Secret"]!));
-
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_opts.Secret));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var claims = new[]
@@ -30,11 +30,10 @@ public class JwtService
         };
 
         var token = new JwtSecurityToken(
-            issuer: _config["Jwt:Issuer"],
-            audience: _config["Jwt:Audience"],
+            issuer: _opts.Issuer,
+            audience: _opts.Audience,
             claims: claims,
-            expires: DateTime.UtcNow.AddHours(
-                int.Parse(_config["Jwt:ExpiryHours"] ?? "24")),
+            expires: DateTime.UtcNow.AddHours(_opts.ExpiryHours),
             signingCredentials: creds);
 
         return new JwtSecurityTokenHandler().WriteToken(token);
