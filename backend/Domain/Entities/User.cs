@@ -8,6 +8,12 @@ public class User
     public string Role { get; set; } = "user";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    // navigation property for owned projects
+    // public identity (URL slug, stored lowercase, unique)
+    public string Handle { get; set; } = string.Empty;
+
+    // profile
+    public string DisplayName { get; set; } = string.Empty;
+    public string? Bio { get; set; }
+
     public ICollection<Project> Projects { get; set; } = new List<Project>();
 }

@@ -19,7 +19,12 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Description).HasMaxLength(2000);
             entity.Property(e => e.Domain).IsRequired().HasMaxLength(50);
 
-            // one User owns many Projects, cascade delete
+            // visibility gate; existing rows backfill to false (draft)
+            entity.Property(e => e.IsPublished).HasDefaultValue(false);
+
+            // matches the public-by-handle predicate (OwnerId = … AND IsPublished = true)
+            entity.HasIndex(e => new { e.OwnerId, e.IsPublished });
+
             entity.HasOne(p => p.Owner)
                   .WithMany(u => u.Projects)
                   .HasForeignKey(p => p.OwnerId)
@@ -33,6 +38,12 @@ public class AppDbContext : DbContext
             entity.HasIndex(e => e.Email).IsUnique();
             entity.Property(e => e.PasswordHash).IsRequired();
             entity.Property(e => e.Role).IsRequired().HasMaxLength(50);
+
+            // public identity + profile
+            entity.Property(e => e.Handle).IsRequired().HasMaxLength(30);
+            entity.HasIndex(e => e.Handle).IsUnique();
+            entity.Property(e => e.DisplayName).IsRequired().HasMaxLength(80);
+            entity.Property(e => e.Bio).HasMaxLength(500);
         });
     }
 }

@@ -9,30 +9,36 @@ namespace MlPortfolio.Api.Services;
 public class ProjectService : IProjectService
 {
     private readonly IProjectRepository _repo;
+    private readonly IUserRepository _userRepo;
 
-    public ProjectService(IProjectRepository repo)
+    public ProjectService(IProjectRepository repo, IUserRepository userRepo)
     {
         _repo = repo;
+        _userRepo = userRepo;
     }
 
-    public async Task<PagedResult<ProjectResponseDto>> GetAllAsync(PaginationQuery query)
+    public async Task<PagedResult<ProjectResponseDto>> GetMyProjectsAsync(int ownerId, PaginationQuery query)
     {
         var skip = (query.Page - 1) * query.PageSize;
-        var (items, total) = await _repo.GetAllAsync(skip, query.PageSize);
-
-        return new PagedResult<ProjectResponseDto>
-        {
-            Items = items.Select(ToDto),
-            Total = total,
-            Page = query.Page,
-            PageSize = query.PageSize
-        };
+        var (items, total) = await _repo.GetByOwnerAsync(ownerId, skip, query.PageSize);
+        return Page(items, total, query);
     }
 
-    public async Task<ProjectResponseDto> GetByIdAsync(int id)
+    public async Task<PagedResult<ProjectResponseDto>> GetPublishedByHandleAsync(string handle, PaginationQuery query)
     {
-        var project = await _repo.GetByIdAsync(id)
-            ?? throw new NotFoundException($"Project with id {id} was not found.");
+        var owner = await _userRepo.GetByHandleAsync(handle)
+            ?? throw new NotFoundException($"No portfolio found for handle '{handle}'.");
+
+        var skip = (query.Page - 1) * query.PageSize;
+        var (items, total) = await _repo.GetPublishedByOwnerAsync(owner.Id, skip, query.PageSize);
+        return Page(items, total, query);
+    }
+
+    public async Task<ProjectResponseDto> GetPublishedByIdAsync(int id)
+    {
+        var project = await _repo.GetByIdAsync(id);
+        if (project is null || !project.IsPublished)
+            throw new NotFoundException($"Project with id {id} was not found.");
         return ToDto(project);
     }
 
@@ -54,11 +60,9 @@ public class ProjectService : IProjectService
 
     public async Task<ProjectResponseDto> UpdateAsync(int id, UpdateProjectDto dto, int requestingUserId)
     {
-        var project = await _repo.GetByIdAsync(id)
-            ?? throw new NotFoundException($"Project with id {id} was not found.");
-
-        if (project.OwnerId != requestingUserId)
-            throw new ForbiddenAccessException("You do not own this project.");
+        var project = await _repo.GetByIdAsync(id);
+        if (project is null || project.OwnerId != requestingUserId)
+            throw new NotFoundException($"Project with id {id} was not found.");
 
         project.Title = dto.Title;
         project.Description = dto.Description;
@@ -69,16 +73,34 @@ public class ProjectService : IProjectService
         return ToDto(updated);
     }
 
+    public async Task<ProjectResponseDto> SetPublishedAsync(int id, bool publish, int requestingUserId)
+    {
+        var project = await _repo.GetByIdAsync(id);
+        if (project is null || project.OwnerId != requestingUserId)
+            throw new NotFoundException($"Project with id {id} was not found.");
+
+        project.IsPublished = publish;
+        var updated = await _repo.UpdateAsync(project);
+        return ToDto(updated);
+    }
+
     public async Task DeleteAsync(int id, int requestingUserId)
     {
-        var project = await _repo.GetByIdAsync(id)
-            ?? throw new NotFoundException($"Project with id {id} was not found.");
-
-        if (project.OwnerId != requestingUserId)
-            throw new ForbiddenAccessException("You do not own this project.");
+        var project = await _repo.GetByIdAsync(id);
+        if (project is null || project.OwnerId != requestingUserId)
+            throw new NotFoundException($"Project with id {id} was not found.");
 
         await _repo.DeleteAsync(project);
     }
+
+    private static PagedResult<ProjectResponseDto> Page(
+        IEnumerable<Project> items, int total, PaginationQuery query) => new()
+        {
+            Items = items.Select(ToDto),
+            Total = total,
+            Page = query.Page,
+            PageSize = query.PageSize
+        };
 
     private static ProjectResponseDto ToDto(Project p) => new()
     {
@@ -88,6 +110,7 @@ public class ProjectService : IProjectService
         Domain = p.Domain,
         ModelType = p.ModelType ?? string.Empty,
         CreatedAt = p.CreatedAt,
-        OwnerId = p.OwnerId
+        OwnerId = p.OwnerId,
+        IsPublished = p.IsPublished
     };
 }

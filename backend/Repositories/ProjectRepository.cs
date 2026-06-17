@@ -13,15 +13,23 @@ public class ProjectRepository : IProjectRepository
         _db = db;
     }
 
-    public async Task<(IEnumerable<Project> Items, int Total)> GetAllAsync(int skip, int take)
-    {
-        var query = _db.Projects.AsNoTracking().OrderByDescending(p => p.CreatedAt);
+    // owner-scoped, (dashboard "my projects").
+    public Task<(IEnumerable<Project> Items, int Total)> GetByOwnerAsync(int ownerId, int skip, int take) =>
+        PageAsync(
+            _db.Projects
+                .AsNoTracking()
+                .Where(p => p.OwnerId == ownerId)
+                .OrderByDescending(p => p.CreatedAt),
+            skip, take);
 
-        var total = await query.CountAsync();
-        var items = await query.Skip(skip).Take(take).ToListAsync();
-
-        return (items, total);
-    }
+    // owner-scoped, PUBLISHED only (public /u/{handle} list).
+    public Task<(IEnumerable<Project> Items, int Total)> GetPublishedByOwnerAsync(int ownerId, int skip, int take) =>
+        PageAsync(
+            _db.Projects
+                .AsNoTracking()
+                .Where(p => p.OwnerId == ownerId && p.IsPublished)
+                .OrderByDescending(p => p.CreatedAt),
+            skip, take);
 
     public async Task<Project?> GetByIdAsync(int id)
     {
@@ -46,5 +54,13 @@ public class ProjectRepository : IProjectRepository
     {
         _db.Projects.Remove(project);
         await _db.SaveChangesAsync();
+    }
+
+    private static async Task<(IEnumerable<Project> Items, int Total)> PageAsync(
+        IQueryable<Project> query, int skip, int take)
+    {
+        var total = await query.CountAsync();
+        var items = await query.Skip(skip).Take(take).ToListAsync();
+        return (items, total);
     }
 }
