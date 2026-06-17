@@ -35,7 +35,6 @@ public class UserRepository : IUserRepository
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: "23505" } pg)
         {
-            // a unique-index violation that raced past the pre-checks.
             var name = pg.ConstraintName ?? string.Empty;
             if (name.Contains("Email", StringComparison.OrdinalIgnoreCase))
                 throw new ConflictException("Email already registered.");
@@ -66,7 +65,7 @@ public class UserRepository : IUserRepository
 
     public async Task<User> UpdateAsync(User user)
     {
-        _db.Users.Update(user);
+        // Entity is tracked (loaded via GetByIdAsync) → SaveChanges updates only changed columns.
         await _db.SaveChangesAsync();
         return user;
     }

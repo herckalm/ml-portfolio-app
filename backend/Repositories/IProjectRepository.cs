@@ -7,6 +7,7 @@ public interface IProjectRepository
     Task<(IEnumerable<Project> Items, int Total)> GetByOwnerAsync(int ownerId, int skip, int take);
     Task<(IEnumerable<Project> Items, int Total)> GetPublishedByOwnerAsync(int ownerId, int skip, int take);
     Task<Project?> GetByIdAsync(int id);
+    Task<Project?> GetPublishedByIdAsync(int id);
     Task<Project> CreateAsync(Project project);
     Task<Project> UpdateAsync(Project project);
     Task DeleteAsync(Project project);

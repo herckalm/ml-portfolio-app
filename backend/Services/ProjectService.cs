@@ -36,9 +36,8 @@ public class ProjectService : IProjectService
 
     public async Task<ProjectResponseDto> GetPublishedByIdAsync(int id)
     {
-        var project = await _repo.GetByIdAsync(id);
-        if (project is null || !project.IsPublished)
-            throw new NotFoundException($"Project with id {id} was not found.");
+        var project = await _repo.GetPublishedByIdAsync(id)
+            ?? throw new NotFoundException($"Project with id {id} was not found.");
         return ToDto(project);
     }
 
