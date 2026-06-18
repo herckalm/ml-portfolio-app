@@ -45,7 +45,5 @@ models/
 Thumbs.db
 .env
 
-.claude
-
 not-for-git/
 **/.gitkeep
