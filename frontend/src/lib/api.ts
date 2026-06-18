@@ -1,4 +1,15 @@
 import axios, { AxiosError } from "axios";
+import {
+  projectSchema,
+  pagedProjectsSchema,
+  userProfileSchema,
+  type Project,
+  type PagedProjects,
+  type UserProfile,
+  type CreateProjectInput,
+  type UpdateProjectInput,
+  type UpdateProfileInput,
+} from "@/types/project";
 
 const TOKEN_KEY = "mlp_token";
 
@@ -68,3 +79,81 @@ api.interceptors.response.use(
     return Promise.reject(new ApiError(message, status, problem));
   },
 );
+
+// client methods — every response is parsed through its Zod schema, so callers
+// receive validated, fully-typed data (createdAt/memberSince arrive as Date).
+// Auth (register/login) is intentionally NOT here — it lands with the auth store.
+
+const DEFAULT_PAGE_SIZE = 10; // backend default
+
+export const projectsApi = {
+  // GET /api/projects — AUTH, my projects (all statuses, incl. drafts)
+  getMine: async (
+    page = 1,
+    pageSize = DEFAULT_PAGE_SIZE,
+  ): Promise<PagedProjects> => {
+    const { data } = await api.get("/api/projects", {
+      params: { page, pageSize },
+    });
+    return pagedProjectsSchema.parse(data);
+  },
+
+  // GET /api/projects/{id} — public, published only (404 if draft/missing)
+  getById: async (id: number): Promise<Project> => {
+    const { data } = await api.get(`/api/projects/${id}`);
+    return projectSchema.parse(data);
+  },
+
+  // POST /api/projects — AUTH → 201, returns the new draft (isPublished:false)
+  create: async (input: CreateProjectInput): Promise<Project> => {
+    const { data } = await api.post("/api/projects", input);
+    return projectSchema.parse(data);
+  },
+
+  // PUT /api/projects/{id} — AUTH owner. ASSUMES the controller returns the updated DTO;
+  // if yours returns 204 NoContent, change return type to void and drop the parse.
+  update: async (id: number, input: UpdateProjectInput): Promise<Project> => {
+    const { data } = await api.put(`/api/projects/${id}`, input);
+    return projectSchema.parse(data);
+  },
+
+  // PATCH /api/projects/{id}/publish — AUTH owner. Same return assumption as update().
+  setPublished: async (id: number, isPublished: boolean): Promise<Project> => {
+    const { data } = await api.patch(`/api/projects/${id}/publish`, {
+      isPublished,
+    });
+    return projectSchema.parse(data);
+  },
+
+  // DELETE /api/projects/{id} — AUTH owner → 204 (no body)
+  remove: async (id: number): Promise<void> => {
+    await api.delete(`/api/projects/${id}`);
+  },
+};
+
+export const usersApi = {
+  // GET /api/users/{handle} — public
+  getProfile: async (handle: string): Promise<UserProfile> => {
+    const { data } = await api.get(`/api/users/${encodeURIComponent(handle)}`);
+    return userProfileSchema.parse(data);
+  },
+
+  // GET /api/users/{handle}/projects — public, published only
+  getProjects: async (
+    handle: string,
+    page = 1,
+    pageSize = DEFAULT_PAGE_SIZE,
+  ): Promise<PagedProjects> => {
+    const { data } = await api.get(
+      `/api/users/${encodeURIComponent(handle)}/projects`,
+      { params: { page, pageSize } },
+    );
+    return pagedProjectsSchema.parse(data);
+  },
+
+  // PUT /api/users/me — AUTH
+  updateMe: async (input: UpdateProfileInput): Promise<UserProfile> => {
+    const { data } = await api.put("/api/users/me", input);
+    return userProfileSchema.parse(data);
+  },
+};
