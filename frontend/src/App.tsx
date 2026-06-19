@@ -4,6 +4,10 @@ import { RootLayout } from "@/components/layout/RootLayout";
 import PublicProfile from "@/pages/PublicProfile";
 import Dashboard from "@/pages/Dashboard";
 import ProjectDetail from "./pages/ProjectDetail";
+import Login from "@/pages/Login";
+import Register from "@/pages/Register";
+import Home from "./pages/Home";
+import NotFound from "./pages/NotFound";
 
 // guards AUTH-only routes. Reads the token directly for now; when we build the
 // auth store this switches to useAuth() with the same redirect logic.
@@ -37,29 +41,4 @@ export default function App() {
       <Route path="register" element={<Register />} />
     </Routes>
   );
-}
-
-/* ------------------------------------------------------------------ *
- * TEMP placeholders — replace each with its real file as we build:    *
- *   RootLayout    → ⑫ components/layout/RootLayout.tsx                *
- *   Home          → landing page                                      *
- *   PublicProfile → /u/:handle  (useUserProjects)                     *
- *   ProjectDetail → /projects/:id  (useProject)                       *
- *   Dashboard     → /dashboard  (useMyProjects)                       *
- *   Login/Register→ auth pages  (consume location.state.from)         *
- *   NotFound      → ⑯ pages/NotFound.tsx                              *
- * Delete each stub once its real import is added above.               *
- * ------------------------------------------------------------------ */
-
-function Home() {
-  return <h1>Home</h1>;
-}
-function Login() {
-  return <h1>Login</h1>;
-}
-function Register() {
-  return <h1>Register</h1>;
-}
-function NotFound() {
-  return <h1>404 — not found</h1>;
 }
