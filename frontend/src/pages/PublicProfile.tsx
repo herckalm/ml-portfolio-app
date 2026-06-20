@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
+import { useAuth } from "@/auth/AuthContext";
 import { useUserProfile } from "@/api/users";
 import { useUserProjects } from "@/api/projects";
 import { ProjectGallery } from "@/components/projects/ProjectGallery";
@@ -17,6 +18,9 @@ export default function PublicProfile() {
 
   const profile = useUserProfile(handle);
   const projects = useUserProjects(handle, page);
+
+  const { user } = useAuth();
+  const owned = !!user && !!handle && user.handle === handle;
 
   // an unknown handle makes the profile call 404 — that's the authoritative
   // "does this user exist" signal, so gate the whole page on it.
@@ -66,6 +70,7 @@ export default function PublicProfile() {
         onPageChange={setPage}
         isLoading={projects.isLoading}
         isError={projects.isError}
+        owned={owned}
         emptyMessage={`${profile.data?.displayName ?? "This user"} hasn't published any projects yet.`}
       />
     </div>

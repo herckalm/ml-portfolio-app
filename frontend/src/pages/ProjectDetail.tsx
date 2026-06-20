@@ -1,4 +1,3 @@
-// src/pages/ProjectDetail.tsx
 import { useLocation, useNavigate, useParams, Link } from "react-router-dom";
 import { ArrowLeft, Loader2, Pencil } from "lucide-react";
 import {
@@ -30,27 +29,40 @@ export default function ProjectDetail() {
   const parsed = idParam ? Number(idParam) : undefined;
   const id = parsed != null && !Number.isNaN(parsed) ? parsed : undefined;
 
+  // owner contexts (Dashboard / your own profile) pass { owned, project } in
+  // router state. `project` is the draft-safe fallback: the public getById 404s
+  // on drafts, so without it an owner couldn't view their own unpublished one.
+  const state = location.state as { owned?: boolean; project?: Project } | null;
+  const owned = Boolean(state?.owned);
+  const passedProject = state?.project;
+
   const { data, isLoading, isError, error } = useProject(id);
-
-  const owned = Boolean((location.state as { owned?: boolean } | null)?.owned);
-
   const publish = usePublishProject();
   const del = useDeleteProject();
 
+  const project = data ?? passedProject; // prefer fresh data; fall back to state
+
   if (id === undefined) return <NotFoundView />;
-  if (isLoading) return <CenteredSpinner label="Loading project…" />;
-  if (isError) {
-    const notFound = error instanceof ApiError && error.status === 404;
-    return notFound ? <NotFoundView /> : <ErrorView />;
+  // only block on the fetch if we have nothing to show yet
+  if (isLoading && !project)
+    return <CenteredSpinner label="Loading project…" />;
+  if (!project) {
+    // settled with no data and nothing passed → distinguish 404 from real error
+    const realError =
+      isError && !(error instanceof ApiError && error.status === 404);
+    return realError ? <ErrorView /> : <NotFoundView />;
   }
-  if (!data) return <NotFoundView />;
 
-  const project: Project = data;
-
-  const onUnpublish = () =>
+  const togglePublish = () =>
     publish.mutate(
-      { id: project.id, isPublished: false },
-      { onSuccess: () => navigate("/dashboard", { replace: true }) },
+      { id: project.id, isPublished: !project.isPublished },
+      {
+        onSuccess: () => {
+          // unpublishing turns it back into a draft → this public page 404s on
+          // reload, so leave. Publishing keeps you here (now viewable).
+          if (project.isPublished) navigate("/dashboard", { replace: true });
+        },
+      },
     );
 
   const busy = publish.isPending || del.isPending;
@@ -98,12 +110,12 @@ export default function ProjectDetail() {
             variant="outline"
             size="sm"
             disabled={busy}
-            onClick={onUnpublish}
+            onClick={togglePublish}
           >
             {publish.isPending && (
               <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
             )}
-            Unpublish
+            {project.isPublished ? "Unpublish" : "Publish"}
           </Button>
 
           <AlertDialog>

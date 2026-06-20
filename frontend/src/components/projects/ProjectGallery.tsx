@@ -19,6 +19,7 @@ type ProjectGalleryProps = {
   errorMessage?: string;
   emptyMessage?: string;
   showStatus?: boolean;
+  owned?: boolean;
   renderActions?: (project: Project) => ReactNode;
 };
 
@@ -33,6 +34,7 @@ export function ProjectGallery({
   errorMessage = "Couldn't load projects.",
   emptyMessage = "No projects yet.",
   showStatus = false,
+  owned = false,
   renderActions,
 }: ProjectGalleryProps) {
   const [domain, setDomain] = useState<DomainFilter>("all");
@@ -78,6 +80,7 @@ export function ProjectGallery({
                 key={project.id}
                 project={project}
                 showStatus={showStatus}
+                owned={owned}
                 actions={renderActions?.(project)}
               />
             ))}

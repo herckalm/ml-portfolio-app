@@ -20,12 +20,17 @@ const dateFmt = new Intl.DateTimeFormat(undefined, {
 type ProjectCardProps = {
   project: Project;
   showStatus?: boolean;
+  // when true, the detail link carries ownership intent + the full project, so
+  // ProjectDetail shows the owner band and can render even a draft (which the
+  // public GET would 404).
+  owned?: boolean;
   actions?: ReactNode;
 };
 
 export function ProjectCard({
   project,
   showStatus = false,
+  owned = false,
   actions,
 }: ProjectCardProps) {
   return (
@@ -35,6 +40,7 @@ export function ProjectCard({
           <CardTitle className="leading-snug">
             <Link
               to={`/projects/${project.id}`}
+              state={owned ? { owned: true, project } : undefined}
               className="underline-offset-4 hover:text-primary hover:underline"
             >
               {project.title}
