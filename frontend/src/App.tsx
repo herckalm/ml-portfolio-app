@@ -6,6 +6,7 @@ import PublicProfile from "@/pages/PublicProfile";
 import Dashboard from "@/pages/Dashboard";
 import ProjectForm from "@/pages/ProjectForm";
 import ProjectDetail from "@/pages/ProjectDetail";
+import Settings from "@/pages/Settings";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import NotFound from "@/pages/NotFound";
@@ -35,6 +36,7 @@ export default function App() {
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="projects/new" element={<ProjectForm />} />
           <Route path="projects/:id/edit" element={<ProjectForm />} />
+          <Route path="settings" element={<Settings />} />
         </Route>
 
         <Route path="*" element={<NotFound />} />

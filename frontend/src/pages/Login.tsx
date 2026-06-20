@@ -4,6 +4,7 @@ import { useAuth } from "@/auth/AuthContext";
 import { ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Boxes } from "lucide-react";
 
 export default function Login() {
   const { login } = useAuth();
@@ -41,6 +42,13 @@ export default function Login() {
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-4">
+    <Link
+  to="/"
+  className="mb-8 flex items-center gap-2 self-start font-semibold tracking-tight"
+>
+  <Boxes className="h-5 w-5 text-primary" />
+  <span>ML Portfolio Hub</span>
+</Link>
       <h1 className="text-2xl font-semibold tracking-tight">Welcome back</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Log in to manage your projects.

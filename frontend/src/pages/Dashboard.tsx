@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ProjectGallery } from "@/components/projects/ProjectGallery";
 import {
@@ -7,17 +8,44 @@ import {
   usePublishProject,
   useDeleteProject,
 } from "@/api/projects";
+import { useUserProfile } from "@/api/users";
+import { useAuth } from "@/auth/AuthContext";
 import type { Project } from "@/types/project";
 
 export default function Dashboard() {
   const [page, setPage] = useState(1);
   const projects = useMyProjects(page);
 
+  // the Dashboard manages projects, but reads the profile too so it can greet
+  // you by name (displayName/bio live in the profile, not the auth session).
+  const { user } = useAuth();
+  const profile = useUserProfile(user?.handle);
+
   return (
     <div className="space-y-8">
       <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Your projects</h1>
-        {/* "New project" button wires to the create form in a later step */}
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Your projects
+          </h1>
+          {profile.data && (
+            <p className="text-sm text-muted-foreground">
+              Signed in as {profile.data.displayName} ·{" "}
+              <Link
+                to={`/u/${profile.data.handle}`}
+                className="text-primary underline underline-offset-4"
+              >
+                view public profile
+              </Link>
+            </p>
+          )}
+        </div>
+        <Button asChild>
+          <Link to="/projects/new">
+            <Plus className="mr-1.5 h-4 w-4" />
+            New project
+          </Link>
+        </Button>
       </header>
 
       <ProjectGallery
@@ -55,6 +83,11 @@ function ProjectActions({ project }: { project: Project }) {
 
   return (
     <>
+      <Button asChild variant="outline" size="sm">
+        <Link to={`/projects/${project.id}/edit`} state={{ project }}>
+          Edit
+        </Link>
+      </Button>
       <Button
         variant="outline"
         size="sm"
