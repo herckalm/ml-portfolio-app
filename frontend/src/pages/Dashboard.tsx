@@ -67,6 +67,7 @@ export default function Dashboard() {
         isError={projects.isError}
         emptyMessage="You haven't created any projects yet."
         showStatus
+        owned
         renderActions={(project) => <ProjectActions project={project} />}
       />
     </div>
