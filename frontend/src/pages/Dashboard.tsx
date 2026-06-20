@@ -2,6 +2,17 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { ProjectGallery } from "@/components/projects/ProjectGallery";
 import {
   useMyProjects,
@@ -16,8 +27,6 @@ export default function Dashboard() {
   const [page, setPage] = useState(1);
   const projects = useMyProjects(page);
 
-  // the Dashboard manages projects, but reads the profile too so it can greet
-  // you by name (displayName/bio live in the profile, not the auth session).
   const { user } = useAuth();
   const profile = useUserProfile(user?.handle);
 
@@ -64,20 +73,12 @@ export default function Dashboard() {
   );
 }
 
-// co-located owner controls. Each card renders its OWN instance, so a publish
-// or delete on one card never spins another card's buttons.
 function ProjectActions({ project }: { project: Project }) {
   const publish = usePublishProject();
   const del = useDeleteProject();
 
   const togglePublish = () =>
     publish.mutate({ id: project.id, isPublished: !project.isPublished });
-
-  const remove = () => {
-    if (confirm(`Delete "${project.title}"? This can't be undone.`)) {
-      del.mutate(project.id);
-    }
-  };
 
   const busy = publish.isPending || del.isPending;
 
@@ -99,16 +100,40 @@ function ProjectActions({ project }: { project: Project }) {
         )}
         {project.isPublished ? "Unpublish" : "Publish"}
       </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="text-destructive hover:text-destructive"
-        disabled={busy}
-        onClick={remove}
-      >
-        {del.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-        Delete
-      </Button>
+
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            disabled={busy}
+          >
+            {del.isPending && (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            )}
+            Delete
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this project?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <strong className="text-foreground">{project.title}</strong> will
+              be permanently removed. This can&apos;t be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => del.mutate(project.id)}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

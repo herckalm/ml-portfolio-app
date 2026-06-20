@@ -1,5 +1,17 @@
+// src/pages/ProjectDetail.tsx
 import { useLocation, useNavigate, useParams, Link } from "react-router-dom";
 import { ArrowLeft, Loader2, Pencil } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
@@ -10,16 +22,6 @@ import {
   useDeleteProject,
 } from "@/api/projects";
 
-// /projects/:id - the PUBLIC detail view. useProject wraps getById, which the
-// backend serves published-only (404 on a draft), so anything that renders here
-// is by definition a live project a logged-out visitor is allowed to see.
-//
-// Ownership note: we do NOT detect it from the data. The DTO has a numeric
-// ownerId; the only identity we hold client-side is the auth handle - no shared
-// key. And this route is public, so it must never call an auth-only endpoint
-// (getMine) to find out who owns the project - that would 401 and bounce an
-// anonymous viewer to /login. Owner intent is therefore passed via router state
-// from owner contexts; without it, this is a clean read-only page.
 export default function ProjectDetail() {
   const { id: idParam } = useParams();
   const location = useLocation();
@@ -32,9 +34,6 @@ export default function ProjectDetail() {
 
   const owned = Boolean((location.state as { owned?: boolean } | null)?.owned);
 
-  // Idle until the owner clicks - mutations never fire on mount, so declaring
-  // them is safe even for anonymous viewers (the owner band that uses them only
-  // renders when `owned` is true).
   const publish = usePublishProject();
   const del = useDeleteProject();
 
@@ -51,18 +50,8 @@ export default function ProjectDetail() {
   const onUnpublish = () =>
     publish.mutate(
       { id: project.id, isPublished: false },
-      // once unpublished it's a draft - this public page would 404 on refresh,
-      // so send the owner back to where drafts live.
       { onSuccess: () => navigate("/dashboard", { replace: true }) },
     );
-
-  const onDelete = () => {
-    if (confirm(`Delete "${project.title}"? This can't be undone.`)) {
-      del.mutate(project.id, {
-        onSuccess: () => navigate("/dashboard", { replace: true }),
-      });
-    }
-  };
 
   const busy = publish.isPending || del.isPending;
 
@@ -93,8 +82,6 @@ export default function ProjectDetail() {
         </div>
       </header>
 
-      {/* whitespace-pre-line preserves the author's line breaks without pulling
-          in a markdown renderer. */}
       <p className="whitespace-pre-line leading-relaxed text-foreground/90">
         {project.description}
       </p>
@@ -118,18 +105,45 @@ export default function ProjectDetail() {
             )}
             Unpublish
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-destructive hover:text-destructive"
-            disabled={busy}
-            onClick={onDelete}
-          >
-            {del.isPending && (
-              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-            )}
-            Delete
-          </Button>
+
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-destructive hover:text-destructive"
+                disabled={busy}
+              >
+                {del.isPending && (
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                )}
+                Delete
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete this project?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  <strong className="text-foreground">{project.title}</strong>{" "}
+                  will be permanently removed. This can&apos;t be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={() =>
+                    del.mutate(project.id, {
+                      onSuccess: () =>
+                        navigate("/dashboard", { replace: true }),
+                    })
+                  }
+                >
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       )}
     </article>
