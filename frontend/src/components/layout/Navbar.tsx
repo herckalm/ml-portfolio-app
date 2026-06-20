@@ -1,17 +1,17 @@
-import { Link } from "react-router-dom";
-import { Boxes, LogOut } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { Boxes, LogOut, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { tokenStore } from "@/lib/api";
+import { useAuth } from "@/auth/AuthContext";
 
 export function Navbar() {
-  // Read once per render. localStorage is NOT reactive — this navbar won't flip
-  // on login/logout from client navigation alone. The auth store (later) fixes
-  // that; until then logout does a hard redirect to force a clean render.
-  const isAuthed = !!tokenStore.get();
+  // reactive now: useAuth() re-renders this on login/logout, so the navbar flips
+  // instantly without a full-page reload.
+  const { isAuthed, logout } = useAuth();
+  const navigate = useNavigate();
 
-  const logout = () => {
-    tokenStore.clear();
-    window.location.assign("/");
+  const handleLogout = () => {
+    logout(); // clears token + session, flips isAuthed
+    navigate("/"); // soft client nav home — no window.location reload
   };
 
   return (
@@ -31,7 +31,13 @@ export function Navbar() {
               <Button asChild variant="ghost" size="sm">
                 <Link to="/dashboard">Dashboard</Link>
               </Button>
-              <Button variant="ghost" size="sm" onClick={logout}>
+              <Button asChild variant="ghost" size="sm">
+                <Link to="/settings">
+                  <Settings className="mr-1.5 h-4 w-4" />
+                  Settings
+                </Link>
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleLogout}>
                 <LogOut className="mr-1.5 h-4 w-4" />
                 Log out
               </Button>

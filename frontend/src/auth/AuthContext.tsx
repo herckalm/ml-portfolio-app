@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { z } from "zod";
 import { api, tokenStore } from "@/lib/api";
+import { useQueryClient } from "@tanstack/react-query";
 
 // authResponse lives here — it's auth's concern, not project.ts's.
 const authResponseSchema = z.object({
@@ -47,6 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // lazy initializer runs once on mount — session survives a page refresh,
   // and the very first render already knows whether you're logged in (no flash).
   const [user, setUser] = useState<AuthUser | null>(() => readSession());
+  const queryClient = useQueryClient();
 
   const apply = (res: AuthResponse) => {
     tokenStore.set(res.token);
@@ -73,6 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     tokenStore.clear();
     localStorage.removeItem(SESSION_KEY);
     setUser(null);
+    queryClient.clear();
   };
 
   return (
