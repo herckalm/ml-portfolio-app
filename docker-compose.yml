@@ -10,7 +10,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "5432:5432"
+      - "5432:5432" # host-published for local DB GUIs; drop in prod
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -18,6 +18,65 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # One-shot: waits for a healthy DB, applies migrations, exits 0.
+  migrator:
+    build:
+      context: ./backend
+      target: migrator
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Jwt__Secret: ${JWT_SECRET}
+      Jwt__Issuer: ml-portfolio-api
+      Jwt__Audience: ml-portfolio-client
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no" # must NOT loop — it's meant to run once and exit
+
+  backend:
+    build:
+      context: ./backend
+      target: runtime # explicit, so it never accidentally builds 'migrator'
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Jwt__Secret: ${JWT_SECRET}
+      Jwt__Issuer: ml-portfolio-api
+      Jwt__Audience: ml-portfolio-client
+      Jwt__ExpiryHours: "24"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully # schema exists before API boots
+    ports:
+      - "5013:8080" # host 5013 → container 8080
+    restart: unless-stopped
+
+  ml-service:
+    build:
+      context: ./ml-service
+    environment:
+      POSTGRES_HOST: postgres # the four names your health.py reads
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    depends_on:
+      - backend # ordering only; nginx resolver makes it resilient
+    ports:
+      - "8080:80"
+    restart: unless-stopped
 
 volumes:
   postgres_data:
