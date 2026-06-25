@@ -1,4 +1,3 @@
-
 # Stage 1 — build & publish
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
@@ -18,6 +17,27 @@ RUN dotnet publish MlPortfolio.Api.csproj \
     --no-restore \
     /p:UseAppHost=false
 
+# EF migration bundle for Fly's release_command
+# Produces a self-contained executable that applies migrations using only the
+# .NET runtime (no SDK) — copied into the runtime image below.
+# The dummy Jwt__*/ConnectionStrings values exist ONLY so EF design-time
+# host-building succeeds while GENERATING the bundle (your Program.cs validates
+# Jwt__* and needs a non-null connection string to construct the DbContext).
+# They are confined to THIS build stage and never reach the runtime image;
+# real values arrive as Fly secrets at release time. Generation never touches
+# a database.
+RUN dotnet tool install --global dotnet-ef --version 10.0.8
+ENV PATH="$PATH:/root/.dotnet/tools"
+ENV ConnectionStrings__DefaultConnection="Host=localhost;Database=build;Username=build;Password=build"
+ENV Jwt__Secret="build-time-only-dummy-secret-padded-past-32-bytes"
+ENV Jwt__Issuer="build"
+ENV Jwt__Audience="build"
+RUN dotnet ef migrations bundle \
+    --project MlPortfolio.Api.csproj \
+    --configuration Release \
+    --output /app/efbundle \
+    --force
+
 # Stage 2 — runtime (slim ASP.NET image, no SDK)
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
@@ -29,6 +49,10 @@ RUN apt-get update \
 
 # Copy just the published output from the build stage
 COPY --from=build /app/publish ./
+
+# Carry the migration bundle (root-owned); make it runnable by the non-root user.
+COPY --from=build /app/efbundle ./efbundle
+RUN chmod +x ./efbundle
 
 # Be explicit so it's self-documenting.
 ENV ASPNETCORE_HTTP_PORTS=8080
