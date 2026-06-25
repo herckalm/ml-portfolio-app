@@ -65,8 +65,14 @@ public class UserRepository : IUserRepository
 
     public async Task<User> UpdateAsync(User user)
     {
-        // Entity is tracked (loaded via GetByIdAsync) → SaveChanges updates only changed columns.
         await _db.SaveChangesAsync();
         return user;
+    }
+
+    public async Task DeleteAsync(User user)
+    {
+        // user is tracked (loaded via GetByIdAsync). Removing it cascades to the user's Projects via the FK's OnDelete(DeleteBehavior.Cascade) — EF issues the dependent deletes for tracked children and Postgres enforces the rest.
+        _db.Users.Remove(user);
+        await _db.SaveChangesAsync();
     }
 }

@@ -11,4 +11,5 @@ public interface IUserRepository
     Task<bool> ExistsByHandleAsync(string handle);
     Task<User?> GetByIdAsync(int id);
     Task<User> UpdateAsync(User user);
+    Task DeleteAsync(User user);
 }
