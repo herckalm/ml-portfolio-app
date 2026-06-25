@@ -167,6 +167,37 @@ api PUT /api/users/me "" "{\"displayName\":\"x\"}"
 expect "Profile edit without token = 401" 401
 echo
 
+echo "-- Account deletion --"
+D_EMAIL="del+$TS@test.com"; D_HANDLE="del-$TS"
+api POST /api/auth/register "" "{\"email\":\"$D_EMAIL\",\"password\":\"$PW\",\"handle\":\"$D_HANDLE\",\"displayName\":\"Delete Me\"}"
+expect_in "Register throwaway user D" 200 201
+D_TOKEN=$(printf '%s' "$BODY" | jq -r .token)
+
+api POST /api/projects "$D_TOKEN" "{\"title\":\"Doomed Project\",\"description\":\"goes with the account\",\"domain\":\"NLP\",\"modelType\":\"X\"}"
+expect "D creates a project (to prove cascade)" 201
+DP=$(printf '%s' "$BODY" | jq -r .id)
+
+api PATCH "/api/projects/$DP/publish" "$D_TOKEN" "{\"isPublished\":true}"
+expect "Publish D's project (so it's publicly visible pre-delete)" 200
+api GET "/api/projects/$DP" ""
+expect "D's published project visible before delete = 200" 200
+
+api DELETE /api/users/me "$D_TOKEN"
+expect "Delete own account = 204" 204
+
+api GET "/api/users/$D_HANDLE" ""
+expect "Deleted user's profile now 404" 404
+
+api GET "/api/projects/$DP" ""
+expect "Deleted user's project gone too (cascade) = 404" 404
+
+api DELETE /api/users/me "$D_TOKEN"
+expect "Second delete with stale token = 404 (not 500)" 404
+
+api PUT /api/users/me "$D_TOKEN" "{\"displayName\":\"ghost\"}"
+expect "Stale token can't edit a deleted profile = 404" 404
+echo
+
 echo "=========================================="
 printf 'Total: %s%d passed%s, %s%d failed%s\n' "$GREEN" "$PASS" "$NC" "$RED" "$FAIL" "$NC"
 echo "=========================================="
