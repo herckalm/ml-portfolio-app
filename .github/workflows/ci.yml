@@ -23,6 +23,7 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
       backend: ${{ steps.filter.outputs.backend }}
       ml-service: ${{ steps.filter.outputs.ml-service }}
+      integration: ${{ steps.filter.outputs.integration }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -35,6 +36,10 @@ jobs:
               - 'backend/**'
             ml-service:
               - 'ml-service/**'
+            integration:
+              - 'backend/**'
+              - 'docker-compose.yml'
+              - 'scripts/backend-test.sh'
 
   # 2) Frontend: install -> lint -> build (build already runs tsc -b).
   frontend:
@@ -97,16 +102,58 @@ jobs:
       - run: uv sync --locked
       - run: uvx ruff check .
 
+  # 4b) Backend integration: boot the real compose stack, run the smoke test.
+  integration:
+    name: Integration (compose + backend smoke)
+    needs: changes
+    if: ${{ needs.changes.outputs.integration == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write ephemeral .env for the throwaway stack
+        run: |
+          cat > .env <<EOF
+          POSTGRES_DB=ml_portfolio
+          POSTGRES_USER=ml_portfolio
+          POSTGRES_PASSWORD=ci_$(openssl rand -hex 8)
+          JWT_SECRET=$(openssl rand -base64 32)
+          EOF
+
+      - name: Build + start backend and its deps (postgres → migrator → backend)
+        run: docker compose up -d --build backend
+
+      - name: Wait for backend to report healthy
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:5013/health >/dev/null 2>&1; then
+              echo "Backend healthy after ~$((i * 2))s"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::backend /health never came up within 120s"; exit 1
+
+      - name: Run backend smoke test
+        run: bash scripts/backend-test.sh http://localhost:5013
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=200
+
+      - name: Tear down (drop the volume too)
+        if: always()
+        run: docker compose down -v
+
   # 5) Single aggregation gate.
   ci-success:
     name: CI success
     if: ${{ always() }}
-    needs: [changes, frontend, backend, ml-service]
+    needs: [changes, frontend, backend, ml-service, integration]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any required job failed
         run: |
-          results="${{ needs.changes.result }} ${{ needs.frontend.result }} ${{ needs.backend.result }} ${{ needs.ml-service.result }}"
+          results="${{ needs.changes.result }} ${{ needs.frontend.result }} ${{ needs.backend.result }} ${{ needs.ml-service.result }} ${{ needs.integration.result }}"
           echo "Job results: $results"
           for r in $results; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
