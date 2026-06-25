@@ -13,10 +13,25 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useAuth } from "@/auth/AuthContext";
 import { ApiError } from "@/lib/api";
 import { updateProfileSchema, type UpdateProfileInput } from "@/types/project";
-import { useUserProfile, useUpdateProfile } from "@/api/users";
+import {
+  useUserProfile,
+  useUpdateProfile,
+  useDeleteAccount,
+} from "@/api/users";
 
 // /settings - auth-only. Resolver loads the current profile to prefill; the
 // inner view seeds its state once from `initial` (no effect copying server data
@@ -54,12 +69,15 @@ export default function Settings() {
   };
 
   return (
-    <SettingsForm
-      key={handle}
-      initial={initial}
-      submitting={update.isPending}
-      onSubmit={save}
-    />
+    <div className="mx-auto max-w-xl space-y-8">
+      <SettingsForm
+        key={handle}
+        initial={initial}
+        submitting={update.isPending}
+        onSubmit={save}
+      />
+      <DangerZone />
+    </div>
   );
 }
 
@@ -113,69 +131,151 @@ function SettingsForm({
   };
 
   return (
-    <div className="mx-auto max-w-xl">
-      <Card>
-        <CardHeader>
-          <CardTitle>Profile settings</CardTitle>
-          <CardDescription>
-            This is what visitors see on your public profile at{" "}
-            <span className="font-mono">/u/your-handle</span>.
-          </CardDescription>
-        </CardHeader>
+    <Card>
+      <CardHeader>
+        <CardTitle>Profile settings</CardTitle>
+        <CardDescription>
+          This is what visitors see on your public profile at{" "}
+          <span className="font-mono">/u/your-handle</span>.
+        </CardDescription>
+      </CardHeader>
 
-        <form onSubmit={handleSubmit} noValidate>
-          <CardContent className="space-y-5">
-            <Field
+      <form onSubmit={handleSubmit} noValidate>
+        <CardContent className="space-y-5">
+          <Field
+            id="displayName"
+            label="Display name"
+            error={errors.displayName}
+          >
+            <Input
               id="displayName"
-              label="Display name"
-              error={errors.displayName}
-            >
-              <Input
-                id="displayName"
-                value={form.displayName}
-                onChange={(e) => set("displayName", e.target.value)}
-                placeholder="e.g. Iraklis"
-                disabled={submitting}
-              />
-            </Field>
-
-            <Field id="bio" label="Bio (optional)" error={errors.bio}>
-              <Textarea
-                id="bio"
-                value={form.bio}
-                onChange={(e) => set("bio", e.target.value)}
-                rows={4}
-                disabled={submitting}
-                placeholder="A sentence or two about your ML focus."
-              />
-            </Field>
-
-            {serverError && (
-              <p className="text-sm text-destructive" role="alert">
-                {serverError}
-              </p>
-            )}
-          </CardContent>
-
-          <CardFooter className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="ghost"
+              value={form.displayName}
+              onChange={(e) => set("displayName", e.target.value)}
+              placeholder="e.g. Iraklis"
               disabled={submitting}
-              onClick={() => window.history.back()}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={submitting}>
-              {submitting && (
+            />
+          </Field>
+
+          <Field id="bio" label="Bio (optional)" error={errors.bio}>
+            <Textarea
+              id="bio"
+              value={form.bio}
+              onChange={(e) => set("bio", e.target.value)}
+              rows={4}
+              disabled={submitting}
+              placeholder="A sentence or two about your ML focus."
+            />
+          </Field>
+
+          {serverError && (
+            <p className="text-sm text-destructive" role="alert">
+              {serverError}
+            </p>
+          )}
+        </CardContent>
+
+        <CardFooter className="flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={submitting}
+            onClick={() => window.history.back()}
+          >
+            Cancel
+          </Button>
+          <Button type="submit" disabled={submitting}>
+            {submitting && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+            Save changes
+          </Button>
+        </CardFooter>
+      </form>
+    </Card>
+  );
+}
+
+// Danger zone — permanent account deletion behind a confirm dialog.
+function DangerZone() {
+  const navigate = useNavigate();
+  const { logout } = useAuth();
+  const del = useDeleteAccount();
+  const [error, setError] = useState<string | null>(null);
+
+  const handleDelete = async () => {
+    setError(null);
+    try {
+      await del.mutateAsync();
+      // server returned 204 — the account is gone. Tear down the local session
+      // (clears token + cached user + query cache) before the still-valid JWT
+      // can be used against a non-existent account, then land on home.
+      logout();
+      navigate("/", { replace: true });
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Couldn't delete your account. Please try again.",
+      );
+    }
+  };
+
+  return (
+    <Card className="border-destructive/50">
+      <CardHeader>
+        <CardTitle className="text-destructive">Danger zone</CardTitle>
+        <CardDescription>
+          Permanently delete your account. This removes your profile and all of
+          your projects, and cannot be undone.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent>
+        {error && (
+          <p className="mb-4 text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        )}
+
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="destructive" disabled={del.isPending}>
+              {del.isPending && (
                 <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
               )}
-              Save changes
+              Delete my account
             </Button>
-          </CardFooter>
-        </form>
-      </Card>
-    </div>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete your account?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This permanently deletes your profile and every project you've
+                created. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={del.isPending}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(e) => {
+                  // keep the dialog's default close behavior, but run our async
+                  // delete; we navigate away on success so the unmount is fine.
+                  e.preventDefault();
+                  void handleDelete();
+                }}
+                disabled={del.isPending}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {del.isPending && (
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                )}
+                Yes, delete everything
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </CardContent>
+    </Card>
   );
 }
 

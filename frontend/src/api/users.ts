@@ -30,3 +30,14 @@ export function useUpdateProfile() {
     },
   });
 }
+
+// DELETE /api/users/me — permanently deletes the account (server cascades to
+// the user's projects). Deliberately NO onSuccess cache work here: the caller
+// (Settings) runs logout() on success, which calls queryClient.clear() and
+// wipes the whole cache anyway. Doing cache surgery here would be redundant
+// and could race the teardown.
+export function useDeleteAccount() {
+  return useMutation({
+    mutationFn: () => usersApi.deleteMe(),
+  });
+}
