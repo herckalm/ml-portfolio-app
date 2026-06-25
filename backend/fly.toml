@@ -1,0 +1,30 @@
+app = 'ml-portfolio-api'
+primary_region = 'fra'
+
+[build]
+  dockerfile = 'Dockerfile'
+  build_target = 'runtime'
+
+[env]
+  ASPNETCORE_ENVIRONMENT = 'Production'
+  ASPNETCORE_HTTP_PORTS = '8080'
+  Jwt__Audience = 'ml-portfolio-client'
+  Jwt__ExpiryHours = '24'
+  Jwt__Issuer = 'ml-portfolio-api'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'suspend'
+  auto_start_machines = true
+  min_machines_running = 0
+  [[http_service.checks]]
+    interval = '15s'
+    timeout = '3s'
+    grace_period = '20s'
+    method = 'GET'
+    path = '/health'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '512mb'
