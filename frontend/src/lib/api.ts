@@ -156,4 +156,10 @@ export const usersApi = {
     const { data } = await api.put("/api/users/me", input);
     return userProfileSchema.parse(data);
   },
+
+  // DELETE /api/users/me — AUTH → 204 (no body). Permanently deletes the
+  // caller's account and (server-side FK cascade) all their projects.
+  deleteMe: async (): Promise<void> => {
+    await api.delete("/api/users/me");
+  },
 };
