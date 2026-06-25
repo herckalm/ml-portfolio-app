@@ -33,6 +33,16 @@ public class UserService : IUserService
         return ToProfileDto(updated);
     }
 
+    public async Task DeleteAccountAsync(int userId)
+    {
+        var user = await _users.GetByIdAsync(userId)
+            ?? throw new NotFoundException("User not found.");
+
+        // Hard delete. The user's Projects are removed by the FK cascade
+        // (Project.Owner OnDelete = Cascade), so no manual project cleanup here.
+        await _users.DeleteAsync(user);
+    }
+
     // maps ONLY public fields — never Email, Role, Id, or PasswordHash.
     private static UserProfileDto ToProfileDto(User user) => new()
     {

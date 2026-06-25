@@ -46,4 +46,15 @@ public class UsersController : ControllerBase
         var profile = await _users.UpdateProfileAsync(userId, dto);
         return Ok(profile);
     }
+
+    // DELETE /api/users/me — authenticated; permanently deletes the caller's
+    // own account and (via FK cascade) all their projects. Hard delete.
+    [Authorize]
+    [HttpDelete("me")]
+    public async Task<IActionResult> DeleteMyAccount()
+    {
+        var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        await _users.DeleteAccountAsync(userId);
+        return NoContent();
+    }
 }
