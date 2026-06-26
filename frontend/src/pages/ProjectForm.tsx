@@ -22,24 +22,12 @@ import {
 } from "@/types/project";
 import { useCreateProject, useUpdateProject, useProject } from "@/api/projects";
 
-// create and edit are the SAME form; the route decides the mode:
-//   /projects/new        -> create  (no :id)
-//   /projects/:id/edit   -> edit    (:id present)
-//
-// Split into two pieces on purpose:
-//   ProjectForm     - the RESOLVER: figures out the mode, gets the prefill, owns
-//                     the mutation + loading/error gates. Renders nothing editable.
-//   ProjectFormView - the FORM: pure controlled inputs whose state is seeded ONCE
-//                     from `initial` via a lazy useState. It only mounts after the
-//                     resolver has a definitive `initial`, so there's no effect
-//                     copying server data into state (that's the cascading-render
-//                     pattern React 19 warns about - derive/seed-once instead).
-
 const EMPTY: CreateProjectInput = {
   title: "",
   description: "",
   domain: "",
   modelType: "",
+  gitHubUrl: "",
 };
 
 export default function ProjectForm() {
@@ -50,38 +38,21 @@ export default function ProjectForm() {
   const id = idParam ? Number(idParam) : undefined;
   const isEdit = id != null && !Number.isNaN(id);
 
-  // EDIT PREFILL - two sources, in priority order:
-  //   1. router state: the Dashboard "Edit" link passes the full project (it
-  //      already has it from useMyProjects, which returns ALL statuses incl.
-  //      drafts). No network round-trip, and it works for drafts.
-  //   2. cold-load fallback (refresh / deep link -> state is gone): re-fetch via
-  //      useProject. CAVEAT: that's the PUBLIC getById, which 404s on a draft -
-  //      so a refreshed edit of an unpublished project lands in the error branch
-  //      below. The backend has no "GET my project by id (any status)" endpoint,
-  //      so this is the contract's limit, not a bug to fix here.
   const passed = (location.state as { project?: Project } | null)?.project;
   const fallback = useProject(isEdit && !passed ? id : undefined);
 
-  // Both hooks run every render (rules of hooks). In create mode useUpdateProject
-  // gets a throwaway id (-1) that's never submitted; in edit mode useCreateProject
-  // is simply never triggered. We pick the active one after.
   const create = useCreateProject();
   const update = useUpdateProject(isEdit ? id! : -1);
   const mutation = isEdit ? update : create;
 
   const save = async (values: CreateProjectInput) => {
     const saved = await mutation.mutateAsync(values);
-    // A freshly created project is a DRAFT; its public detail page (/projects/:id)
-    // 404s until it's published. So we always return to the dashboard, where drafts
-    // are visible and the publish toggle lives - never to the detail page.
     navigate("/dashboard", { replace: true, state: { justSaved: saved.id } });
   };
 
-  // cold-load edit: still fetching to prefill
   if (isEdit && !passed && fallback.isLoading) {
     return <CenteredSpinner label="Loading project…" />;
   }
-  // cold-load edit failed (most likely a draft - see the prefill comment)
   if (isEdit && !passed && fallback.isError) {
     return (
       <div className="mx-auto max-w-xl space-y-4 py-12 text-center">
@@ -97,15 +68,11 @@ export default function ProjectForm() {
     );
   }
 
-  // By here `initial` is settled: EMPTY for create, the passed/fetched project
-  // for edit. The view seeds its state from it once and owns it thereafter.
   const source = passed ?? fallback.data;
   const initial = source ? toInput(source) : EMPTY;
 
   return (
     <ProjectFormView
-      // remount (fresh state) if we ever switch between different projects without
-      // unmounting - e.g. /projects/1/edit -> /projects/2/edit via a stateful link.
       key={isEdit ? id : "new"}
       initial={initial}
       isEdit={isEdit}
@@ -128,7 +95,6 @@ function ProjectFormView({
   submitting: boolean;
   onSubmit: (values: CreateProjectInput) => Promise<void>;
 }) {
-  // seeded ONCE from `initial` - no effect, no cascading render.
   const [form, setForm] = useState<CreateProjectInput>(() => initial);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [serverError, setServerError] = useState<string | null>(null);
@@ -142,10 +108,6 @@ function ProjectFormView({
     e.preventDefault();
     setServerError(null);
 
-    // Reuse the response schema as an INPUT validator. The same Zod object that
-    // guards the network boundary now guards the form - one contract, not two
-    // hand-kept-in-sync rule sets. (Same "validate where data enters the system"
-    // discipline you'd apply to model I/O.)
     const parsed = createProjectSchema.safeParse(form);
     if (!parsed.success) {
       const fe = z.flattenError(parsed.error).fieldErrors;
@@ -154,12 +116,13 @@ function ProjectFormView({
         description: fe.description?.[0],
         domain: fe.domain?.[0],
         modelType: fe.modelType?.[0],
+        gitHubUrl: fe.gitHubUrl?.[0],
       });
       return;
     }
 
     try {
-      await onSubmit(parsed.data); // navigates on success -> this view unmounts
+      await onSubmit(parsed.data);
     } catch (err) {
       setServerError(
         err instanceof ApiError
@@ -209,9 +172,6 @@ function ProjectFormView({
             </Field>
 
             <Field id="domain" label="Domain" error={errors.domain}>
-              {/* Single-select chips - reuses CategoryFilter's visual language
-                  (default = violet/selected, outline = unselected) and constrains
-                  input to the exact PROJECT_DOMAINS strings the backend stores. */}
               <div
                 className="flex flex-wrap gap-2"
                 role="group"
@@ -246,6 +206,21 @@ function ProjectFormView({
               />
             </Field>
 
+            <Field
+              id="gitHubUrl"
+              label="GitHub URL (optional)"
+              error={errors.gitHubUrl}
+            >
+              <Input
+                id="gitHubUrl"
+                type="url"
+                value={form.gitHubUrl ?? ""}
+                onChange={(e) => set("gitHubUrl", e.target.value)}
+                placeholder="https://github.com/you/your-repo"
+                disabled={submitting}
+              />
+            </Field>
+
             {serverError && (
               <p className="text-sm text-destructive" role="alert">
                 {serverError}
@@ -275,18 +250,16 @@ function ProjectFormView({
   );
 }
 
-// Project (full DTO) -> the editable subset the form + payload schemas care about.
 function toInput(p: Project): CreateProjectInput {
   return {
     title: p.title,
     description: p.description,
     domain: p.domain,
     modelType: p.modelType,
+    gitHubUrl: p.gitHubUrl ?? "",
   };
 }
 
-// labeled-field wrapper - mirrors the Field helper in Login/Register so every
-// form in the app reads the same (native <label> + control + error line).
 function Field({
   id,
   label,

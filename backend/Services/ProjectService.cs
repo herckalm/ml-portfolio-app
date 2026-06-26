@@ -49,6 +49,7 @@ public class ProjectService : IProjectService
             Description = dto.Description,
             Domain = dto.Domain,
             ModelType = dto.ModelType,
+            GitHubUrl = dto.GitHubUrl,
             CreatedAt = DateTime.UtcNow,
             OwnerId = ownerId
         };
@@ -67,6 +68,7 @@ public class ProjectService : IProjectService
         project.Description = dto.Description;
         project.Domain = dto.Domain;
         project.ModelType = dto.ModelType;
+        project.GitHubUrl = dto.GitHubUrl;
 
         var updated = await _repo.UpdateAsync(project);
         return ToDto(updated);
@@ -108,6 +110,7 @@ public class ProjectService : IProjectService
         Description = p.Description,
         Domain = p.Domain,
         ModelType = p.ModelType ?? string.Empty,
+        GitHubUrl = p.GitHubUrl,
         CreatedAt = p.CreatedAt,
         OwnerId = p.OwnerId,
         IsPublished = p.IsPublished

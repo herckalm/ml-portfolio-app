@@ -15,6 +15,9 @@ public class CreateProjectDto
 
     [Required, MaxLength(100)]
     public string ModelType { get; set; } = string.Empty;
+
+    [Url, MaxLength(500)]
+    public string? GitHubUrl { get; set; }
 }
 
 public class UpdateProjectDto
@@ -30,6 +33,9 @@ public class UpdateProjectDto
 
     [Required, MaxLength(100)]
     public string ModelType { get; set; } = string.Empty;
+
+    [Url, MaxLength(500)]
+    public string? GitHubUrl { get; set; }
 }
 
 public class SetPublishedDto
@@ -44,6 +50,7 @@ public class ProjectResponseDto
     public string Description { get; set; } = string.Empty;
     public string Domain { get; set; } = string.Empty;
     public string ModelType { get; set; } = string.Empty;
+    public string? GitHubUrl { get; set; }
     public DateTime CreatedAt { get; set; }
     public int OwnerId { get; set; }
     public bool IsPublished { get; set; }

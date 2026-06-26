@@ -25,6 +25,11 @@ export const projectSchema = z.object({
   description: z.string(),
   domain: z.string(), // "NLP", "Computer Vision", ...
   modelType: z.string(),
+  // string when set, null when omitted. .optional() is deliberate: it tolerates
+  // a backend that hasn't been redeployed with GitHubUrl yet (absent key) instead
+  // of throwing on parse — important during the window where the frontend ships
+  // before the backend redeploy on Fly.
+  gitHubUrl: z.string().nullable().optional(),
   createdAt: z.coerce.date(),
   ownerId: z.number(),
   isPublished: z.boolean(),
@@ -53,6 +58,11 @@ export const createProjectSchema = z.object({
   description: z.string().min(1),
   domain: z.string().min(1),
   modelType: z.string().min(1),
+  gitHubUrl: z
+    .url("Enter a valid URL (https://github.com/…)")
+    .or(z.literal(""))
+    .optional()
+    .transform((v) => v || undefined),
 });
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
 

@@ -1,0 +1,29 @@
+app = 'ml-portfolio-web'
+primary_region = 'fra'   # same region as the backend → fast 6PN hop
+
+[build]
+  dockerfile = 'Dockerfile'
+  build_target = 'runtime'
+
+# These two feed the nginx.conf.template via envsubst at container start.
+# RESOLVER must be bracketed — it's Fly's internal IPv6 DNS server.
+[env]
+  RESOLVER = '[fdaa::3]'
+  BACKEND_UPSTREAM = 'http://ml-portfolio-api.internal:8080'
+
+[http_service]
+  internal_port = 80          # nginx listens on 80 inside the container
+  force_https = true          # TLS terminates at Fly's edge; this is the public app
+  auto_stop_machines = 'suspend'
+  auto_start_machines = true
+  min_machines_running = 0    # frontend IS behind Fly Proxy, so it self-wakes on traffic
+  [[http_service.checks]]
+    interval = '15s'
+    timeout = '3s'
+    grace_period = '10s'
+    method = 'GET'
+    path = '/'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '256mb'            # static nginx is tiny; 256 is plenty

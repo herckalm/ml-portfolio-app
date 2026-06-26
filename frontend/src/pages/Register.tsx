@@ -22,6 +22,7 @@ export default function Register() {
     displayName: "",
   });
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
 
   const set = (key: keyof typeof form) => (e: ChangeEvent<HTMLInputElement>) =>
@@ -30,6 +31,7 @@ export default function Register() {
   const onSubmit = async (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
+    setFieldErrors({});
     setSubmitting(true);
     try {
       await register({
@@ -40,11 +42,22 @@ export default function Register() {
       });
       navigate("/dashboard", { replace: true });
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? err.message
-          : "Something went wrong. Try again.",
-      );
+      if (err instanceof ApiError && err.problem?.errors) {
+        // ASP.NET keys validation errors by PascalCase field name ("Password").
+        // Lower-case the first letter to match our form field ids ("password").
+        const fe: Record<string, string> = {};
+        for (const [key, msgs] of Object.entries(err.problem.errors)) {
+          const field = key.charAt(0).toLowerCase() + key.slice(1);
+          if (msgs?.length) fe[field] = msgs[0];
+        }
+        setFieldErrors(fe);
+      } else {
+        setError(
+          err instanceof ApiError
+            ? err.message
+            : "Something went wrong. Try again.",
+        );
+      }
     } finally {
       setSubmitting(false);
     }
@@ -52,13 +65,13 @@ export default function Register() {
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-4">
-        <Link
-      to="/"
-      className="mb-8 flex items-center gap-2 self-start font-semibold tracking-tight"
-    >
-      <Boxes className="h-5 w-5 text-primary" />
-      <span>ML Portfolio Hub</span>
-    </Link>
+      <Link
+        to="/"
+        className="mb-8 flex items-center gap-2 self-start font-semibold tracking-tight"
+      >
+        <Boxes className="h-5 w-5 text-primary" />
+        <span>ML Portfolio Hub</span>
+      </Link>
       <h1 className="text-2xl font-semibold tracking-tight">
         Create your portfolio
       </h1>
@@ -76,6 +89,7 @@ export default function Register() {
           required
           value={form.email}
           onChange={set("email")}
+          error={fieldErrors.email}
         />
         <Field
           id="password"
@@ -85,6 +99,7 @@ export default function Register() {
           required
           value={form.password}
           onChange={set("password")}
+          error={fieldErrors.password}
         />
         <Field
           id="handle"
@@ -92,12 +107,14 @@ export default function Register() {
           placeholder="e.g. iraklis"
           value={form.handle}
           onChange={set("handle")}
+          error={fieldErrors.handle}
         />
         <Field
           id="displayName"
           label="Display name (optional)"
           value={form.displayName}
           onChange={set("displayName")}
+          error={fieldErrors.displayName}
         />
 
         {error && <p className="text-sm text-destructive">{error}</p>}
@@ -120,14 +137,20 @@ export default function Register() {
 function Field({
   id,
   label,
+  error,
   ...props
-}: { id: string; label: string } & InputHTMLAttributes<HTMLInputElement>) {
+}: {
+  id: string;
+  label: string;
+  error?: string;
+} & InputHTMLAttributes<HTMLInputElement>) {
   return (
     <div className="space-y-1.5">
       <label htmlFor={id} className="text-sm font-medium">
         {label}
       </label>
-      <Input id={id} {...props} />
+      <Input id={id} aria-invalid={!!error} {...props} />
+      {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
 }
