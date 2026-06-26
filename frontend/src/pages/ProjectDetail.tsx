@@ -29,9 +29,6 @@ export default function ProjectDetail() {
   const parsed = idParam ? Number(idParam) : undefined;
   const id = parsed != null && !Number.isNaN(parsed) ? parsed : undefined;
 
-  // owner contexts (Dashboard / your own profile) pass { owned, project } in
-  // router state. `project` is the draft-safe fallback: the public getById 404s
-  // on drafts, so without it an owner couldn't view their own unpublished one.
   const state = location.state as { owned?: boolean; project?: Project } | null;
   const owned = Boolean(state?.owned);
   const passedProject = state?.project;
@@ -40,14 +37,12 @@ export default function ProjectDetail() {
   const publish = usePublishProject();
   const del = useDeleteProject();
 
-  const project = data ?? passedProject; // prefer fresh data; fall back to state
+  const project = data ?? passedProject;
 
   if (id === undefined) return <NotFoundView />;
-  // only block on the fetch if we have nothing to show yet
   if (isLoading && !project)
     return <CenteredSpinner label="Loading project…" />;
   if (!project) {
-    // settled with no data and nothing passed → distinguish 404 from real error
     const realError =
       isError && !(error instanceof ApiError && error.status === 404);
     return realError ? <ErrorView /> : <NotFoundView />;
@@ -58,8 +53,6 @@ export default function ProjectDetail() {
       { id: project.id, isPublished: !project.isPublished },
       {
         onSuccess: () => {
-          // unpublishing turns it back into a draft → this public page 404s on
-          // reload, so leave. Publishing keeps you here (now viewable).
           if (project.isPublished) navigate("/dashboard", { replace: true });
         },
       },
@@ -91,6 +84,28 @@ export default function ProjectDetail() {
               day: "numeric",
             })}
           </time>
+          {project.gitHubUrl && (
+            <>
+              <span aria-hidden>·</span>
+
+              <a
+                href={project.gitHubUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 font-medium text-foreground underline-offset-4 hover:underline"
+              >
+                <svg
+                  viewBox="0 0 16 16"
+                  className="h-4 w-4"
+                  fill="currentColor"
+                  aria-hidden
+                >
+                  <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+                </svg>
+                View code
+              </a>
+            </>
+          )}
         </div>
       </header>
 
