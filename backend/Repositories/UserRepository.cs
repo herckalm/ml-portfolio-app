@@ -6,6 +6,14 @@ using Npgsql;
 
 namespace MlPortfolio.Api.Repositories;
 
+/// <summary>
+/// EF Core implementation of <see cref="IUserRepository"/>. Two behaviors worth
+/// knowing: handle lookups normalize to trimmed-lowercase before querying (so the
+/// stored-lowercase handle matches regardless of caller casing), and
+/// <see cref="CreateAsync"/> converts Postgres unique-violation errors into a
+/// domain <see cref="ConflictException"/> so the service/API layers never see raw
+/// DB exceptions.
+/// </summary>
 public class UserRepository : IUserRepository
 {
     private readonly AppDbContext _db;
@@ -33,6 +41,8 @@ public class UserRepository : IUserRepository
             await _db.SaveChangesAsync();
             return user;
         }
+        // 23505 = unique_violation. Inspect the constraint name to return a
+        // specific message; the generic fallback covers any other unique index.
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: "23505" } pg)
         {
             var name = pg.ConstraintName ?? string.Empty;
@@ -46,6 +56,7 @@ public class UserRepository : IUserRepository
 
     public async Task<User?> GetByHandleAsync(string handle)
     {
+        // Handles are stored lowercase; normalize the lookup key to match.
         var normalized = handle.Trim().ToLowerInvariant();
         return await _db.Users
             .AsNoTracking()
@@ -71,7 +82,9 @@ public class UserRepository : IUserRepository
 
     public async Task DeleteAsync(User user)
     {
-        // user is tracked (loaded via GetByIdAsync). Removing it cascades to the user's Projects via the FK's OnDelete(DeleteBehavior.Cascade) — EF issues the dependent deletes for tracked children and Postgres enforces the rest.
+        // user is tracked (loaded via GetByIdAsync). Removing it cascades to the
+        // user's Projects via the FK's OnDelete(DeleteBehavior.Cascade) — EF issues
+        // the dependent deletes for tracked children and Postgres enforces the rest.
         _db.Users.Remove(user);
         await _db.SaveChangesAsync();
     }

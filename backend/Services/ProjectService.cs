@@ -6,6 +6,14 @@ using MlPortfolio.Api.Repositories;
 
 namespace MlPortfolio.Api.Services;
 
+/// <summary>
+/// Implements <see cref="IProjectService"/>. Translates pagination queries into
+/// skip/take, enforces the owner-scoped authorization rule (a project that's
+/// missing OR not owned by the requester is reported as not-found, never as
+/// forbidden), and maps entities to <see cref="ProjectResponseDto"/> via the
+/// private helpers. Depends on the user repository only to resolve a handle to an
+/// owner id for the public-by-handle listing.
+/// </summary>
 public class ProjectService : IProjectService
 {
     private readonly IProjectRepository _repo;
@@ -60,6 +68,7 @@ public class ProjectService : IProjectService
 
     public async Task<ProjectResponseDto> UpdateAsync(int id, UpdateProjectDto dto, int requestingUserId)
     {
+        // Missing or not-owned are collapsed into the same not-found result.
         var project = await _repo.GetByIdAsync(id);
         if (project is null || project.OwnerId != requestingUserId)
             throw new NotFoundException($"Project with id {id} was not found.");
@@ -103,6 +112,7 @@ public class ProjectService : IProjectService
             PageSize = query.PageSize
         };
 
+    /// <summary>Maps a project entity to its response DTO, coalescing a null ModelType to empty string.</summary>
     private static ProjectResponseDto ToDto(Project p) => new()
     {
         Id = p.Id,

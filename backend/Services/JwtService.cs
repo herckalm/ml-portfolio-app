@@ -8,6 +8,11 @@ using MlPortfolio.Api.Domain.Entities;
 
 namespace MlPortfolio.Api.Services;
 
+/// <summary>
+/// Issues signed JWTs for authenticated users. Reads its signing key, issuer,
+/// audience, and lifetime from <see cref="JwtOptions"/> (validated at startup),
+/// and stamps the user's id, email, and role into claims. Symmetric HMAC-SHA256.
+/// </summary>
 public class JwtService
 {
     private readonly JwtOptions _opts;
@@ -17,6 +22,11 @@ public class JwtService
         _opts = opts.Value;
     }
 
+    /// <summary>
+    /// Builds a token for <paramref name="user"/>. The NameIdentifier claim carries
+    /// the user id that <c>CurrentUserId()</c> reads back out on authenticated
+    /// requests; expiry is now + <see cref="JwtOptions.ExpiryHours"/>.
+    /// </summary>
     public string GenerateToken(User user)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_opts.Secret));

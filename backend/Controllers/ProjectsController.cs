@@ -7,6 +7,15 @@ using MlPortfolio.Api.Services;
 
 namespace MlPortfolio.Api.Controllers;
 
+/// <summary>
+/// Project CRUD under <c>api/projects</c> (route derived from the controller
+/// name via <c>[controller]</c>). Mixed access: one public read of a single
+/// published project; everything else is authenticated and scoped to the caller.
+/// Two invariants run through the whole controller — owner identity is taken
+/// from the JWT and never the request body, and owner-only operations on someone
+/// else's (or a nonexistent) project return 404 rather than 403, so the API
+/// never reveals whether a foreign id exists.
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
 public class ProjectsController : ControllerBase
@@ -18,8 +27,11 @@ public class ProjectsController : ControllerBase
         _service = service;
     }
 
-    // GET /api/projects?page=1&pageSize=10
-    // Authenticated. Returns the CALLER'S OWN projects (drafts + published).
+    /// <summary>
+    /// GET <c>/api/projects</c> — authenticated. Returns the caller's own
+    /// projects, drafts included, paged. (Public listing goes through the users
+    /// controller by handle instead.)
+    /// </summary>
     [Authorize]
     [HttpGet]
     public async Task<ActionResult<PagedResult<ProjectResponseDto>>> GetMine([FromQuery] PaginationQuery query)
@@ -28,8 +40,7 @@ public class ProjectsController : ControllerBase
         return Ok(result);
     }
 
-    // GET /api/projects/{id}
-    // Public. Published projects only — a draft or missing id is a 404.
+    /// <summary>GET <c>/api/projects/{id}</c> — public; published only, so a draft or missing id is 404.</summary>
     [HttpGet("{id:int}")]
     public async Task<ActionResult<ProjectResponseDto>> GetById(int id)
     {
@@ -37,7 +48,10 @@ public class ProjectsController : ControllerBase
         return Ok(project);
     }
 
-    // POST /api/projects — authenticated. Owner comes from the JWT, never the body.
+    /// <summary>
+    /// POST <c>/api/projects</c> — authenticated. Owner is set from the JWT.
+    /// Returns 201 with a Location header pointing at <see cref="GetById"/>.
+    /// </summary>
     [Authorize]
     [HttpPost]
     public async Task<ActionResult<ProjectResponseDto>> Create(CreateProjectDto dto)
@@ -46,7 +60,7 @@ public class ProjectsController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
-    // PUT /api/projects/{id} — owner only (cross-tenant => 404).
+    /// <summary>PUT <c>/api/projects/{id}</c> — owner only; cross-tenant access is a 404.</summary>
     [Authorize]
     [HttpPut("{id:int}")]
     public async Task<ActionResult<ProjectResponseDto>> Update(int id, UpdateProjectDto dto)
@@ -55,7 +69,7 @@ public class ProjectsController : ControllerBase
         return Ok(updated);
     }
 
-    // PATCH /api/projects/{id}/publish — owner only. Flips draft <-> published.
+    /// <summary>PATCH <c>/api/projects/{id}/publish</c> — owner only; toggles draft ↔ published.</summary>
     [Authorize]
     [HttpPatch("{id:int}/publish")]
     public async Task<ActionResult<ProjectResponseDto>> SetPublished(int id, SetPublishedDto dto)
@@ -64,7 +78,7 @@ public class ProjectsController : ControllerBase
         return Ok(updated);
     }
 
-    // DELETE /api/projects/{id} — owner only (cross-tenant => 404).
+    /// <summary>DELETE <c>/api/projects/{id}</c> — owner only; cross-tenant access is a 404.</summary>
     [Authorize]
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id)
@@ -73,7 +87,10 @@ public class ProjectsController : ControllerBase
         return NoContent();
     }
 
-    // owner identity is ALWAYS derived from the validated JWT, never from client input.
+    /// <summary>
+    /// Resolves the caller's user id from the validated JWT's NameIdentifier
+    /// claim. Owner identity is always derived here, never from client input.
+    /// </summary>
     private int CurrentUserId() =>
         int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 }

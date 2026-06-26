@@ -5,6 +5,13 @@ using MlPortfolio.Api.Repositories;
 
 namespace MlPortfolio.Api.Services;
 
+/// <summary>
+/// Implements <see cref="IUserService"/>. Handles the public profile read and the
+/// caller's own profile update/delete. Trims inputs (normalizing a blank bio to
+/// null) and projects to <see cref="UserProfileDto"/> through a mapper that
+/// exposes only public fields. Account deletion is a hard delete; projects are
+/// removed by the database cascade, not here.
+/// </summary>
 public class UserService : IUserService
 {
     private readonly IUserRepository _users;
@@ -43,7 +50,7 @@ public class UserService : IUserService
         await _users.DeleteAsync(user);
     }
 
-    // maps ONLY public fields — never Email, Role, Id, or PasswordHash.
+    /// <summary>Maps to the public profile DTO — only public fields, never Email, Role, Id, or PasswordHash.</summary>
     private static UserProfileDto ToProfileDto(User user) => new()
     {
         Handle = user.Handle,

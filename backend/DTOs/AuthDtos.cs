@@ -2,6 +2,10 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MlPortfolio.Api.DTOs;
 
+/// <summary>
+/// Registration payload. Validated via data annotations before the auth service
+/// runs, so malformed input is rejected with 400 by the framework, not the service.
+/// </summary>
 public record RegisterRequest
 {
     [Required]
@@ -14,9 +18,12 @@ public record RegisterRequest
     [MaxLength(100, ErrorMessage = "Password must not exceed 100 characters.")]
     public string Password { get; init; } = string.Empty;
 
-    // optional desired public handle for /u/{handle}.
-    // if omitted, one is derived from the email. Validated only when provided
-    // (the attributes treat null as valid), so it's completely optional.
+    /// <summary>
+    /// Optional public handle for <c>/u/{handle}</c>; the service derives one from
+    /// the email when omitted. The attributes treat null as valid, so they apply
+    /// only when a value is supplied — that's what makes the field truly optional
+    /// while still constraining its shape when present.
+    /// </summary>
     [MinLength(3, ErrorMessage = "Handle must be at least 3 characters.")]
     [MaxLength(30, ErrorMessage = "Handle must not exceed 30 characters.")]
     [RegularExpression(
@@ -24,11 +31,12 @@ public record RegisterRequest
         ErrorMessage = "Handle may contain only letters, numbers, and single hyphens between them.")]
     public string? Handle { get; init; }
 
-    // optional display name; defaults to the handle if omitted.
+    /// <summary>Optional; the service defaults it to the handle when omitted.</summary>
     [MaxLength(80)]
     public string? DisplayName { get; init; }
 }
 
+/// <summary>Login payload. Verified against the stored password hash by the auth service.</summary>
 public record LoginRequest
 {
     [Required]
@@ -41,5 +49,9 @@ public record LoginRequest
     public string Password { get; init; } = string.Empty;
 }
 
-// field: Handle — so the client can link straight to the user's public page.
+/// <summary>
+/// Successful-auth response from both register and login. <c>Handle</c> is
+/// included so the client can link straight to the user's public page without a
+/// follow-up request.
+/// </summary>
 public record AuthResponse(string Token, string Email, string Role, string Handle);

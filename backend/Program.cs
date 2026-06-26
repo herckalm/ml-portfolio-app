@@ -1,3 +1,14 @@
+// -----------------------------------------------------------------------------
+// Application composition root.
+//
+// Boots the API in two phases: (1) configure the DI container and bind/validate
+// configuration on the builder, then (2) assemble the middleware pipeline on the
+// built app. Order matters in both phases — services must be registered before
+// the app is built, and middleware runs in the order added. JWT options are
+// validated at startup so a misconfigured secret/issuer/audience fails the boot
+// rather than the first request.
+// -----------------------------------------------------------------------------
+
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -15,17 +26,19 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// Error envelope — every error response is RFC 7807 ProblemDetails
+// Error envelope — every error response is RFC 7807 ProblemDetails, produced by
+// the GlobalExceptionHandler registered here.
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
-// EF Core + PostgreSQL
+// EF Core + PostgreSQL. The connection string is required; its absence is a
+// fail-fast configuration error, not a runtime fallback.
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(connectionString));
 
-// CORS
+// CORS — single named policy for the React dev server (Vite default port).
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("ReactDev", policy =>
@@ -34,12 +47,16 @@ builder.Services.AddCors(options =>
               .AllowAnyHeader());
 });
 
-// JWT — bind and validate options at startup
+// JWT — bind options and validate the data annotations at startup.
 builder.Services.AddOptions<JwtOptions>()
     .BindConfiguration(JwtOptions.SectionName)
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
+// The bearer middleware below needs the concrete values now (before the app is
+// built), so the section is also read eagerly here. The explicit null/blank
+// guards duplicate the data-annotation checks deliberately — they guarantee the
+// non-null values this setup block depends on, independent of when ValidateOnStart runs.
 var jwtOptions = builder.Configuration
     .GetSection(JwtOptions.SectionName)
     .Get<JwtOptions>()
@@ -52,12 +69,16 @@ if (string.IsNullOrWhiteSpace(jwtOptions.Issuer))
 if (string.IsNullOrWhiteSpace(jwtOptions.Audience))
     throw new InvalidOperationException("Jwt:Audience is not configured.");
 
+// Application services — all scoped (per-request lifetime), matching the DbContext.
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<IUserService, UserService>();
+
+// Authentication — validate issuer, audience, lifetime, and signing key on every
+// incoming bearer token. The signing key here must match the one JwtService signs with.
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(opts =>
     {
@@ -77,7 +98,8 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
-// Middleware — exception handler first so it catches everything downstream
+// Middleware pipeline — order is significant.
+// Exception handler first so it wraps everything downstream in ProblemDetails.
 app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())
@@ -86,6 +108,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// HTTPS redirection only outside development (dev runs plain HTTP on :5013).
 if (!app.Environment.IsDevelopment())
 {
     app.UseHttpsRedirection();
@@ -93,16 +116,18 @@ if (!app.Environment.IsDevelopment())
 
 app.UseRouting();
 app.UseCors("ReactDev");
+// Authentication before authorization: identify the caller, then enforce policy.
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
-// Health endpoints
+// Health endpoints — liveness (process up) and readiness (DB reachable).
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
 app.MapGet("/health/db", async (AppDbContext db) =>
 {
     try
     {
+        // Cheapest possible round-trip to confirm the connection is live.
         await db.Database.ExecuteSqlRawAsync("SELECT 1");
         return Results.Ok(new { status = "healthy", db = "reachable" });
     }
