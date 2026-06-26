@@ -4,6 +4,13 @@ using MlPortfolio.Api.Infrastructure.Data;
 
 namespace MlPortfolio.Api.Repositories;
 
+/// <summary>
+/// EF Core implementation of <see cref="IProjectRepository"/>. Read queries use
+/// <c>AsNoTracking</c> and push filtering/ordering/paging into SQL; the one
+/// tracked read (<see cref="GetByIdAsync"/>) feeds the mutation paths. Paging is
+/// centralized in <see cref="PageAsync"/>, which returns the page plus the total
+/// count for <c>PagedResult</c>.
+/// </summary>
 public class ProjectRepository : IProjectRepository
 {
     private readonly AppDbContext _db;
@@ -31,7 +38,7 @@ public class ProjectRepository : IProjectRepository
 
     public async Task<Project?> GetByIdAsync(int id)
     {
-        // callers that mutate (update/delete/publish) rely on change tracking.
+        // Callers that mutate (update/delete/publish) rely on change tracking.
         return await _db.Projects.FindAsync(id);
     }
 
@@ -64,6 +71,11 @@ public class ProjectRepository : IProjectRepository
         await _db.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// Runs a count then a skip/take against the same query, returning the page
+    /// and the unpaged total. Two round-trips by design — the total is needed for
+    /// pagination metadata.
+    /// </summary>
     private static async Task<(IEnumerable<Project> Items, int Total)> PageAsync(
         IQueryable<Project> query, int skip, int take)
     {

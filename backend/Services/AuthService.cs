@@ -5,6 +5,14 @@ using MlPortfolio.Api.Repositories;
 
 namespace MlPortfolio.Api.Services;
 
+/// <summary>
+/// Implements registration and login. Hashes passwords with BCrypt, issues tokens
+/// via <see cref="JwtService"/>, and owns handle resolution: an explicitly chosen
+/// handle is validated against the reserved set and uniqueness, while an omitted
+/// one is derived from the email local-part and auto-uniquified. All handles are
+/// lowercased before persistence, which is what lets the repository's normalized
+/// lookups find them.
+/// </summary>
 public class AuthService : IAuthService
 {
     private readonly IUserRepository _repo;
@@ -18,6 +26,8 @@ public class AuthService : IAuthService
 
     public async Task<AuthResponse> RegisterAsync(RegisterRequest req)
     {
+        // Friendly pre-check for a clean conflict message; the DB unique constraint
+        // (caught in the repository) remains the race-safe authority.
         if (await _repo.ExistsByEmailAsync(req.Email))
             throw new ConflictException("Email already registered.");
 
@@ -43,6 +53,8 @@ public class AuthService : IAuthService
     {
         var user = await _repo.GetByEmailAsync(req.Email);
 
+        // Same error whether the email is unknown or the password is wrong — don't
+        // reveal which accounts exist.
         if (user is null || !BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
             throw new UnauthorizedAccessException("Invalid credentials.");
 
@@ -50,15 +62,19 @@ public class AuthService : IAuthService
         return new AuthResponse(token, user.Email, user.Role, user.Handle);
     }
 
-    // if the user explicitly chose a handle, use it
-    // if they didn't, derive one from the email and auto-uniquify it.
+    /// <summary>
+    /// Resolves the handle to persist. An explicit request is normalized, screened
+    /// against the reserved set, and checked for uniqueness — failing either with a
+    /// deliberately uniform message (so reserved words aren't enumerable). When no
+    /// handle is requested, one is derived from the email local-part and uniquified.
+    /// </summary>
     private async Task<string> ResolveHandleAsync(string? requested, string email)
     {
         if (!string.IsNullOrWhiteSpace(requested))
         {
             var handle = requested.Trim().ToLowerInvariant();
 
-            // uniform message so i don't reveal which words are reserved.
+            // Uniform message so we don't reveal which words are reserved.
             if (HandleGenerator.IsReserved(handle) || await _repo.ExistsByHandleAsync(handle))
                 throw new ConflictException("That handle isn't available.");
 
@@ -69,9 +85,14 @@ public class AuthService : IAuthService
         return await MakeUniqueAsync(baseSlug);
     }
 
+    /// <summary>
+    /// Finds a free handle from a base slug by appending "-N" until one is neither
+    /// reserved nor taken. Bounds the base to 25 chars to leave room for the suffix
+    /// and enforces the 3-char minimum, falling back to "user".
+    /// </summary>
     private async Task<string> MakeUniqueAsync(string baseSlug)
     {
-        // bound length (leave room for a "-NN" suffix) and guarantee the minimum.
+        // Bound length (leave room for a "-NN" suffix) and guarantee the minimum.
         if (baseSlug.Length > 25) baseSlug = baseSlug[..25].Trim('-');
         if (baseSlug.Length < 3) baseSlug = "user";
 
