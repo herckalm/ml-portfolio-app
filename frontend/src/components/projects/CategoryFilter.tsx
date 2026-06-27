@@ -1,7 +1,13 @@
+/**
+ * Domain filter as a row of toggle buttons. Controlled — owns no state; parent
+ * holds the selected value. Options are `PROJECT_DOMAINS` plus an explicit
+ * `"all"` sentinel for no-filter. The exhaustive button set (vs a dropdown)
+ * keeps the active filter always visible.
+ */
 import { Button } from "@/components/ui/button";
 import { PROJECT_DOMAINS, type ProjectDomain } from "@/types/project";
 
-// "all" is an explicit no-filter sentinel
+/** Selected filter: a real domain, or `"all"` meaning no filter applied. */
 export type DomainFilter = ProjectDomain | "all";
 
 const OPTIONS: DomainFilter[] = ["all", ...PROJECT_DOMAINS];

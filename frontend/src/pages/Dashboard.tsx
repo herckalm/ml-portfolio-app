@@ -1,3 +1,13 @@
+/**
+ * Owner dashboard. Lists the signed-in user's projects (all statuses) via
+ * {@link useMyProjects} and renders them through the shared {@link ProjectGallery}
+ * in owner mode (`owned` + `showStatus`), injecting per-card publish/edit/delete
+ * actions. Also shows a link to the user's own public profile.
+ *
+ * This is one of the two call sites of the project mutation hooks (the other is
+ * ProjectDetail); see {@link ProjectActions} for how invalidation flows back into
+ * the list after a publish or delete.
+ */
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Loader2, Plus } from "lucide-react";
@@ -28,7 +38,7 @@ export default function Dashboard() {
   const projects = useMyProjects(page);
 
   const { user } = useAuth();
-  const profile = useUserProfile(user?.handle);
+  const profile = useUserProfile(user?.handle); // enabled-gated until handle resolves
 
   return (
     <div className="space-y-8">
@@ -74,6 +84,12 @@ export default function Dashboard() {
   );
 }
 
+/**
+ * Per-card owner actions: edit (carries the project in router state so the form
+ * skips a refetch), publish toggle, and a confirm-gated delete. The mutations'
+ * own `onSuccess` handlers invalidate the list cache, so this component holds no
+ * success logic — it only reflects pending state via `busy`.
+ */
 function ProjectActions({ project }: { project: Project }) {
   const publish = usePublishProject();
   const del = useDeleteProject();

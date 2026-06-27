@@ -1,3 +1,14 @@
+/**
+ * Registration page. Collects email/password plus optional handle and display
+ * name, calls `register` from {@link useAuth}, and redirects to /dashboard on
+ * success (register also logs the user in — see AuthContext).
+ *
+ * Two error channels: field-level validation errors map to per-input messages
+ * (see the PascalCase→camelCase remap in `onSubmit`), while anything else shows
+ * as a single form-level message. Optional fields are trimmed and sent as
+ * `undefined` when blank, so the backend applies its own defaults (e.g. handle
+ * generation) rather than receiving empty strings.
+ */
 import {
   useState,
   type SubmitEvent,
@@ -25,6 +36,7 @@ export default function Register() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
 
+  // Curried change handler: set("email") returns the onChange for that field.
   const set = (key: keyof typeof form) => (e: ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [key]: e.target.value }));
 
@@ -37,6 +49,8 @@ export default function Register() {
       await register({
         email: form.email,
         password: form.password,
+        // Trim and omit-if-blank so the backend generates a handle / defaults a
+        // display name rather than storing an empty string.
         handle: form.handle.trim() || undefined,
         displayName: form.displayName.trim() || undefined,
       });
@@ -48,7 +62,7 @@ export default function Register() {
         const fe: Record<string, string> = {};
         for (const [key, msgs] of Object.entries(err.problem.errors)) {
           const field = key.charAt(0).toLowerCase() + key.slice(1);
-          if (msgs?.length) fe[field] = msgs[0];
+          if (msgs?.length) fe[field] = msgs[0]; // first message per field is enough
         }
         setFieldErrors(fe);
       } else {
@@ -134,6 +148,8 @@ export default function Register() {
   );
 }
 
+/** Labeled input with inline error display. Wires `aria-invalid` and the error
+ *  paragraph from a single `error` prop; forwards all native input attributes. */
 function Field({
   id,
   label,

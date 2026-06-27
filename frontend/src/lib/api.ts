@@ -1,3 +1,22 @@
+/**
+ * Axios transport layer: the configured client, auth-token handling, error
+ * normalization, and the raw request methods for every endpoint.
+ *
+ * This is the foundation the data-fetching layer sits on. The TanStack Query
+ * hooks live one level out in `src/api/*` and *call* the `projectsApi` /
+ * `usersApi` methods exported here — so note the two `api`-named layers:
+ *   - `src/lib/api.ts`  (this file) — axios instance + raw async methods
+ *   - `src/api/*.ts`               — useQuery/useMutation wrappers + cache keys
+ *
+ * Two cross-cutting guarantees every caller can rely on:
+ *   1. Responses are Zod-parsed here, so callers receive validated, fully-typed
+ *      data — date fields arrive as real `Date`, not strings.
+ *   2. Failures reject with a normalized {@link ApiError} (`.message` + `.status`),
+ *      never a raw AxiosError.
+ *
+ * Auth endpoints (register/login) are intentionally absent — they live with the
+ * auth store, since they mint the token the rest of these calls depend on.
+ */
 import axios, { AxiosError } from "axios";
 import {
   projectSchema,
@@ -13,7 +32,11 @@ import {
 
 const TOKEN_KEY = "mlp_token";
 
-// a wrapper so the rest of the app never touches localStorage keys directly.
+/**
+ * Single chokepoint for the JWT in localStorage, so no other module hardcodes
+ * the storage key. Auth writes via `.set`; the response interceptor and logout
+ * clear via `.clear`.
+ */
 export const tokenStore = {
   get: () => localStorage.getItem(TOKEN_KEY),
   set: (t: string) => localStorage.setItem(TOKEN_KEY, t),
@@ -25,7 +48,7 @@ export const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
-// request interceptor: attach the bearer token if we have one
+// Request interceptor: attach the bearer token when present.
 api.interceptors.request.use((config) => {
   const token = tokenStore.get();
   if (token) {
@@ -34,7 +57,7 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// mirrors my backend's error envelope.
+/** TS mirror of the backend's RFC 7807 error envelope (ProblemDetails). */
 export interface ProblemDetails {
   type?: string;
   title?: string;
@@ -44,7 +67,11 @@ export interface ProblemDetails {
   errors?: Record<string, string[]>;
 }
 
-// normalized error every caller can rely on: error.message + error.status.
+/**
+ * Normalized error type every caller sees on rejection. Flattens the backend's
+ * ProblemDetails into a readable `.message` while preserving `.status` (for
+ * branching, e.g. 404 vs 401) and the raw `.problem` (for field-level `errors`).
+ */
 export class ApiError extends Error {
   status?: number;
   problem?: ProblemDetails;
@@ -56,7 +83,17 @@ export class ApiError extends Error {
   }
 }
 
-// response interceptor: central 401 handling + error normalization
+/**
+ * Response interceptor: centralizes 401 handling and converts every AxiosError
+ * into an {@link ApiError}.
+ *
+ * @remarks
+ * On 401 the token is cleared and the app hard-redirects to `/login` via
+ * `window.location.href` (not the router). This is deliberate: a full reload
+ * guarantees a clean auth reset — wiping in-memory state and the TanStack cache —
+ * which router navigation alone wouldn't. The path guard avoids a redirect loop
+ * when the 401 came from the login page itself.
+ */
 api.interceptors.response.use(
   (response) => response,
   (error: AxiosError<ProblemDetails>) => {
@@ -80,14 +117,15 @@ api.interceptors.response.use(
   },
 );
 
-// client methods — every response is parsed through its Zod schema, so callers
-// receive validated, fully-typed data (createdAt/memberSince arrive as Date).
-// Auth (register/login) is intentionally NOT here — it lands with the auth store.
+const DEFAULT_PAGE_SIZE = 10; // matches the backend's default page size
 
-const DEFAULT_PAGE_SIZE = 10; // backend default
-
+/**
+ * Raw project endpoint methods. Each parses its response through the matching
+ * Zod schema before returning. Auth/ownership requirements are noted per method;
+ * the server enforces them — these comments document the contract, not a guard.
+ */
 export const projectsApi = {
-  // GET /api/projects — AUTH, my projects (all statuses, incl. drafts)
+  /** GET /api/projects — auth; the caller's own projects, all statuses incl. drafts. */
   getMine: async (
     page = 1,
     pageSize = DEFAULT_PAGE_SIZE,
@@ -98,26 +136,34 @@ export const projectsApi = {
     return pagedProjectsSchema.parse(data);
   },
 
-  // GET /api/projects/{id} — public, published only (404 if draft/missing)
+  /** GET /api/projects/{id} — public, published only (404 if draft or missing). */
   getById: async (id: number): Promise<Project> => {
     const { data } = await api.get(`/api/projects/${id}`);
     return projectSchema.parse(data);
   },
 
-  // POST /api/projects — AUTH → 201, returns the new draft (isPublished:false)
+  /** POST /api/projects — auth; returns the new draft (201, isPublished:false). */
   create: async (input: CreateProjectInput): Promise<Project> => {
     const { data } = await api.post("/api/projects", input);
     return projectSchema.parse(data);
   },
 
-  // PUT /api/projects/{id} — AUTH owner. ASSUMES the controller returns the updated DTO;
-  // if yours returns 204 NoContent, change return type to void and drop the parse.
+  /**
+   * PUT /api/projects/{id} — auth, owner only.
+   *
+   * @remarks Assumes the controller returns the updated DTO. If your endpoint
+   * returns 204 NoContent instead, change the return type to `void` and drop
+   * the `.parse` — otherwise this throws on an empty body.
+   */
   update: async (id: number, input: UpdateProjectInput): Promise<Project> => {
     const { data } = await api.put(`/api/projects/${id}`, input);
     return projectSchema.parse(data);
   },
 
-  // PATCH /api/projects/{id}/publish — AUTH owner. Same return assumption as update().
+  /**
+   * PATCH /api/projects/{id}/publish — auth, owner only. Same DTO-return
+   * assumption as {@link projectsApi.update}.
+   */
   setPublished: async (id: number, isPublished: boolean): Promise<Project> => {
     const { data } = await api.patch(`/api/projects/${id}/publish`, {
       isPublished,
@@ -125,20 +171,25 @@ export const projectsApi = {
     return projectSchema.parse(data);
   },
 
-  // DELETE /api/projects/{id} — AUTH owner → 204 (no body)
+  /** DELETE /api/projects/{id} — auth, owner only → 204 (no body). */
   remove: async (id: number): Promise<void> => {
     await api.delete(`/api/projects/${id}`);
   },
 };
 
+/**
+ * Raw user/profile endpoint methods. Same parse-on-return contract as
+ * {@link projectsApi}. Public reads take a `handle`; `me` operations act on the
+ * authenticated caller.
+ */
 export const usersApi = {
-  // GET /api/users/{handle} — public
+  /** GET /api/users/{handle} — public profile. */
   getProfile: async (handle: string): Promise<UserProfile> => {
     const { data } = await api.get(`/api/users/${encodeURIComponent(handle)}`);
     return userProfileSchema.parse(data);
   },
 
-  // GET /api/users/{handle}/projects — public, published only
+  /** GET /api/users/{handle}/projects — public, published only. */
   getProjects: async (
     handle: string,
     page = 1,
@@ -151,14 +202,16 @@ export const usersApi = {
     return pagedProjectsSchema.parse(data);
   },
 
-  // PUT /api/users/me — AUTH
+  /** PUT /api/users/me — auth; updates the caller's own profile. */
   updateMe: async (input: UpdateProfileInput): Promise<UserProfile> => {
     const { data } = await api.put("/api/users/me", input);
     return userProfileSchema.parse(data);
   },
 
-  // DELETE /api/users/me — AUTH → 204 (no body). Permanently deletes the
-  // caller's account and (server-side FK cascade) all their projects.
+  /**
+   * DELETE /api/users/me — auth → 204 (no body). Permanently deletes the
+   * caller's account; the server-side FK cascade removes all their projects too.
+   */
   deleteMe: async (): Promise<void> => {
     await api.delete("/api/users/me");
   },

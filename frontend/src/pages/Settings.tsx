@@ -1,3 +1,11 @@
+/**
+ * Account settings at `/settings` (auth-only). Two cards: profile editing
+ * (display name + bio) and a danger zone for permanent account deletion.
+ *
+ * Container/view split like ProjectForm: this component resolves the current
+ * profile (to prefill) and the inner SettingsForm seeds its state once from
+ * `initial` — no effect syncing server data into form state.
+ */
 import { useState, type ReactNode, type SubmitEvent } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { z } from "zod";
@@ -33,15 +41,12 @@ import {
   useDeleteAccount,
 } from "@/api/users";
 
-// /settings - auth-only. Resolver loads the current profile to prefill; the
-// inner view seeds its state once from `initial` (no effect copying server data
-// into state).
 export default function Settings() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const handle = user?.handle;
 
-  const profile = useUserProfile(handle); // GET /api/users/{handle} (own, public data)
+  const profile = useUserProfile(handle); // own profile via the public GET
   const update = useUpdateProfile();
 
   const save = async (values: UpdateProfileInput) => {
@@ -49,7 +54,7 @@ export default function Settings() {
     if (handle) navigate(`/u/${handle}`); // land on the public profile so the change is visible
   };
 
-  // protected route guarantees a session, but guard defensively
+  // The protected route guarantees a session; this is a defensive guard.
   if (!handle) {
     return (
       <CenteredError message="You need to be signed in to edit your profile." />
@@ -65,7 +70,7 @@ export default function Settings() {
 
   const initial: FormState = {
     displayName: profile.data.displayName,
-    bio: profile.data.bio ?? "", // contract sends null; the textarea wants a string
+    bio: profile.data.bio ?? "", // contract sends null; the textarea needs a string
   };
 
   return (
@@ -84,6 +89,8 @@ export default function Settings() {
 type FormState = { displayName: string; bio: string };
 type FieldErrors = Partial<Record<keyof UpdateProfileInput, string>>;
 
+/** Controlled profile form. Owns input state and validation; persistence is the
+ *  parent's `onSubmit`. Note the bio normalization in `handleSubmit`. */
 function SettingsForm({
   initial,
   submitting,
@@ -99,14 +106,15 @@ function SettingsForm({
 
   const set = (key: keyof FormState, value: string) => {
     setForm((f) => ({ ...f, [key]: value }));
-    if (errors[key]) setErrors((e) => ({ ...e, [key]: undefined }));
+    if (errors[key]) setErrors((e) => ({ ...e, [key]: undefined })); // clear on edit
   };
 
   const handleSubmit = async (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     setServerError(null);
 
-    // empty bio -> null (the contract is bio?: string | null, not ""):
+    // The textarea holds "" for empty, but the contract is bio?: string | null —
+    // so an empty bio is sent as null, not an empty string.
     const input: UpdateProfileInput = {
       displayName: form.displayName.trim(),
       bio: form.bio.trim() ? form.bio.trim() : null,
@@ -120,7 +128,7 @@ function SettingsForm({
     }
 
     try {
-      await onSubmit(parsed.data); // navigates on success -> this view unmounts
+      await onSubmit(parsed.data); // navigates on success → this view unmounts
     } catch (err) {
       setServerError(
         err instanceof ApiError
@@ -193,7 +201,11 @@ function SettingsForm({
   );
 }
 
-// Danger zone — permanent account deletion behind a confirm dialog.
+/**
+ * Permanent account deletion behind a confirm dialog. This is the last data-layer
+ * loop: {@link useDeleteAccount} (no cache work of its own) followed by
+ * `logout()` — which clears token + cached user + the entire query cache.
+ */
 function DangerZone() {
   const navigate = useNavigate();
   const { logout } = useAuth();
@@ -204,9 +216,9 @@ function DangerZone() {
     setError(null);
     try {
       await del.mutateAsync();
-      // server returned 204 — the account is gone. Tear down the local session
-      // (clears token + cached user + query cache) before the still-valid JWT
-      // can be used against a non-existent account, then land on home.
+      // 204 — the account is gone. Tear down the local session (token + cached
+      // user + query cache) before the still-valid JWT can hit a now-deleted
+      // account, then land on home.
       logout();
       navigate("/", { replace: true });
     } catch (err) {
@@ -258,8 +270,8 @@ function DangerZone() {
               </AlertDialogCancel>
               <AlertDialogAction
                 onClick={(e) => {
-                  // keep the dialog's default close behavior, but run our async
-                  // delete; we navigate away on success so the unmount is fine.
+                  // Override the dialog's auto-close so our async delete runs;
+                  // success navigates away, so unmounting mid-flight is fine.
                   e.preventDefault();
                   void handleDelete();
                 }}
@@ -279,6 +291,7 @@ function DangerZone() {
   );
 }
 
+/** Labeled field wrapper; child control plus optional inline error. */
 function Field({
   id,
   label,

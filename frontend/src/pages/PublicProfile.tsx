@@ -1,3 +1,12 @@
+/**
+ * Public profile at `/u/:handle`. The read-side counterpart to the Dashboard:
+ * same {@link ProjectGallery}, but fed by the public published-only endpoints
+ * ({@link useUserProfile} + {@link useUserProjects}) instead of the owner's list.
+ *
+ * Detects the visitor viewing their *own* profile (`user.handle === handle`) and
+ * passes `owned` through to the gallery so their cards carry owner context — the
+ * same router-state mechanism the dashboard uses (see ProjectCard / ProjectDetail).
+ */
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
@@ -22,8 +31,8 @@ export default function PublicProfile() {
   const { user } = useAuth();
   const owned = !!user && !!handle && user.handle === handle;
 
-  // an unknown handle makes the profile call 404 — that's the authoritative
-  // "does this user exist" signal, so gate the whole page on it.
+  // The profile call 404ing is the authoritative "user doesn't exist" signal
+  // (an unknown handle has no profile), so the whole page gates on it.
   const notFound =
     profile.error instanceof ApiError && profile.error.status === 404;
 

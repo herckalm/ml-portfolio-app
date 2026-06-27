@@ -1,9 +1,26 @@
+/**
+ * Authentication context: owns the auth endpoints, the session lifecycle, and
+ * the `user` state the rest of the app reads via {@link useAuth}.
+ *
+ * This is the counterpart to the `lib/api.ts` transport layer — auth lives here
+ * deliberately, because login/register *mint* the token that every other request
+ * depends on. It closes three loops referenced elsewhere:
+ *   - the `/api/auth/*` calls intentionally absent from `lib/api.ts`,
+ *   - the only writer of `tokenStore.set` (the request interceptor reads it),
+ *   - `logout()` → `queryClient.clear()`, which `useDeleteAccount` relies on for
+ *     teardown instead of doing its own cache surgery.
+ *
+ * Two storage keys back a session: the JWT (via `tokenStore`, key `mlp_token`)
+ * and the cached user object (`mlp_session`). A session is only trusted when
+ * *both* are present (see {@link readSession}).
+ */
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { z } from "zod";
 import { api, tokenStore } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 
-// authResponse lives here — it's auth's concern, not project.ts's.
+/** Login/register response. Defined here, not in `types/project.ts`, because
+ *  the token-bearing auth payload is this module's concern alone. */
 const authResponseSchema = z.object({
   token: z.string(),
   email: z.string(),
@@ -32,7 +49,12 @@ type AuthContextValue = {
 const SESSION_KEY = "mlp_session";
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-// hydrate from storage, but only trust the session if a token is also present.
+/**
+ * Rehydrate the cached user from storage — but only if a token is also present.
+ * The token is the source of truth; a session object without one is stale (e.g.
+ * the interceptor cleared the token on a 401 but the page didn't reload) and is
+ * treated as logged-out.
+ */
 function readSession(): AuthUser | null {
   if (!tokenStore.get()) return null;
   const raw = localStorage.getItem(SESSION_KEY);
@@ -45,11 +67,12 @@ function readSession(): AuthUser | null {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  // lazy initializer runs once on mount — session survives a page refresh,
-  // and the very first render already knows whether you're logged in (no flash).
+  // Lazy initializer runs once on mount: the session survives a refresh, and the
+  // first render already knows the auth state — no logged-out flash before hydration.
   const [user, setUser] = useState<AuthUser | null>(() => readSession());
   const queryClient = useQueryClient();
 
+  /** Shared success path for login/register: persist token + session, set state. */
   const apply = (res: AuthResponse) => {
     tokenStore.set(res.token);
     const u: AuthUser = {
@@ -71,6 +94,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     apply(authResponseSchema.parse(data));
   };
 
+  /** Full teardown: clear token + session, drop user state, and wipe the entire
+   *  TanStack cache so no previous user's data bleeds into the next session. */
   const logout = () => {
     tokenStore.clear();
     localStorage.removeItem(SESSION_KEY);
@@ -87,6 +112,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/** Access the auth context. Throws if used outside `<AuthProvider>` — a wiring
+ *  bug, not a runtime condition, so it fails loud rather than returning null. */
 // eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const ctx = useContext(AuthContext);

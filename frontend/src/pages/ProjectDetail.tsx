@@ -1,3 +1,21 @@
+/**
+ * Project detail page at `/projects/:id`. Renders a single project and, when the
+ * viewer owns it, an action band (edit / publish toggle / delete).
+ *
+ * @remarks
+ * Two subtleties drive this component:
+ *
+ * 1. **Draft visibility via router state.** The public GET 404s on unpublished
+ *    projects, so a draft can't be loaded by id alone. When navigation comes from
+ *    an owner surface (ProjectCard / Dashboard with `owned`), the full project
+ *    rides in `location.state`. We prefer the freshly-fetched `data` but fall
+ *    back to that passed project (`data ?? passedProject`) — which is what lets an
+ *    owner open their own draft here. `owned` also gates the action band.
+ *
+ * 2. **404 vs real error.** A 404 is the *expected* outcome for a draft/missing
+ *    project and shows the soft "not found" view; any other error (network, 5xx)
+ *    shows the error view. The `error.status === 404` check is what separates them.
+ */
 import { useLocation, useNavigate, useParams, Link } from "react-router-dom";
 import { ArrowLeft, Loader2, Pencil } from "lucide-react";
 import {
@@ -26,9 +44,11 @@ export default function ProjectDetail() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // Coerce the route param to a number; treat a non-numeric id as "no id".
   const parsed = idParam ? Number(idParam) : undefined;
   const id = parsed != null && !Number.isNaN(parsed) ? parsed : undefined;
 
+  // Owner-context payload passed via router state (see file remarks #1).
   const state = location.state as { owned?: boolean; project?: Project } | null;
   const owned = Boolean(state?.owned);
   const passedProject = state?.project;
@@ -37,12 +57,15 @@ export default function ProjectDetail() {
   const publish = usePublishProject();
   const del = useDeleteProject();
 
+  // Prefer fresh server data; fall back to the passed project so drafts render.
   const project = data ?? passedProject;
 
   if (id === undefined) return <NotFoundView />;
   if (isLoading && !project)
     return <CenteredSpinner label="Loading project…" />;
   if (!project) {
+    // Distinguish an expected 404 (draft/missing → soft not-found) from a genuine
+    // fetch failure (→ error view). See file remarks #2.
     const realError =
       isError && !(error instanceof ApiError && error.status === 404);
     return realError ? <ErrorView /> : <NotFoundView />;
@@ -53,6 +76,8 @@ export default function ProjectDetail() {
       { id: project.id, isPublished: !project.isPublished },
       {
         onSuccess: () => {
+          // Unpublishing makes this page's public view 404 on next load, so
+          // bounce the owner back to the dashboard rather than stranding them.
           if (project.isPublished) navigate("/dashboard", { replace: true });
         },
       },
@@ -177,6 +202,7 @@ export default function ProjectDetail() {
   );
 }
 
+/** Soft not-found: the expected view for a missing or unpublished (draft) project. */
 function NotFoundView() {
   return (
     <div className="mx-auto max-w-md space-y-4 py-16 text-center">
@@ -193,6 +219,7 @@ function NotFoundView() {
   );
 }
 
+/** Hard error: a genuine fetch failure (network/5xx), as opposed to a 404. */
 function ErrorView() {
   return (
     <div className="mx-auto max-w-md space-y-4 py-16 text-center">

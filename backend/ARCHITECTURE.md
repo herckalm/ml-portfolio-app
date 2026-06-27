@@ -1,85 +1,58 @@
-# Architecture
-
-System-level documentation for the ML Portfolio application. This document
-covers the overall shape, then goes deep on the **backend** (the only service
-documented in code so far). Frontend and ml-service are sketched at the system
-level with detail deferred to their own passes.
-
----
-
-## 1. System context
-
-The application is three services:
-
-- **Backend API** (`backend/`, ASP.NET Core + PostgreSQL) — authentication,
-  user profiles, and project CRUD. The system of record. **Documented in full
-  below.**
-- **Frontend** (`frontend/`, React) — the SPA users interact with; renders
-  public portfolios at `/u/{handle}` and the authenticated owner dashboard.
-  _Documentation deferred to the frontend pass._
-- **ML service** (`ml-service/`) — the model-inference layer. Currently a
-  scaffold; gets documented when its scope is built out. _Deferred._
-
-The frontend talks to the backend over HTTP (JSON). The ml-service's integration
-boundary with the backend is still an open design question (see §7).
-
-```
-  React SPA  ──HTTP/JSON──▶  Backend API  ──▶  PostgreSQL
- (frontend)                  (backend)
-                                  │
-                                  └──(future)──▶  ML service
-```
-
----
-
-## 2. Backend shape
-
-The backend is a layered ASP.NET Core API. A request flows inward through clear
-boundaries, each depending only on the layer beneath it:
-
-```
-HTTP request
-   │
-   ▼
-Controllers ......... routing, status codes, JWT identity extraction
-   │  (DTOs in)
-   ▼
-Services ............ business logic, authorization, entity↔DTO mapping
-   │
-   ▼
-Repositories ........ data access, tracked/untracked reads, paging
-   │
-   ▼
-AppDbContext (EF) ... schema source of truth
-   │
-   ▼
-PostgreSQL
-```
-
-Cross-cutting concerns sit outside the request path: **configuration** binds and
-validates options at startup, **middleware** wraps every response in a uniform
-error envelope, and a set of **domain exceptions** carry semantic failure across
-the layers. Each layer has its own `README.md`; this document covers what spans
-them.
+Two layers sit outside this path. **`src/types`** holds the Zod schemas — the
+contract — that the transport layer parses against; they're the TS mirror of the
+backend DTOs, so a response is validated against the same shape the backend
+promised. **`src/auth`** owns the session and the login/register calls (it mints
+the token everything else depends on), kept separate from the rest of the API
+surface for that reason. Each folder has its own `README.md`; this section covers
+what spans them.
 
 ### Folder map
 
-| Folder                | Role                                    | Docs          |
-| --------------------- | --------------------------------------- | ------------- |
-| `Domain/Entities`     | Persistent model (`User`, `Project`)    | folder README |
-| `Infrastructure/Data` | `AppDbContext` — schema source of truth | folder README |
-| `Migrations`          | Generated schema ledger                 | §5 below      |
-| `DTOs`                | API contract shapes                     | folder README |
-| `Repositories`        | Data access                             | folder README |
-| `Services`            | Business logic                          | folder README |
-| `Controllers`         | HTTP layer                              | folder README |
-| `Configuration`       | Typed, validated options                | §3 below      |
-| `Exceptions`          | Domain failure types                    | §6 below      |
-| `Middleware`          | Error envelope                          | §6 below      |
+| Folder           | Role                                        | Docs          |
+| ---------------- | ------------------------------------------- | ------------- |
+| `src/types`      | Zod schemas + inferred types (the contract) | folder README |
+| `src/lib`        | axios transport + shared helpers            | folder README |
+| `src/api`        | TanStack Query hooks (data layer)           | folder README |
+| `src/auth`       | `AuthContext` — session + auth endpoints    | folder README |
+| `src/components` | Reusable UI (`layout`, `projects`, `ui`)    | folder README |
+| `src/pages`      | Route components (the container layer)      | folder README |
+
+### Two cross-cutting patterns
+
+Both touch the API contract, so they're worth stating at the system level (full
+treatment in `frontend/README.md`):
+
+- **Router-state draft-bypass.** A draft project 404s on the public GET — there's
+  no public way to fetch one by id. So owner surfaces pass the full project object
+  in router state, and the detail/edit pages prefer fetched data but fall back to
+  it. This is what lets an owner view and edit their own unpublished drafts
+  despite the public endpoint refusing them.
+- **404-as-signal.** The client reads a 404 as meaningful domain state, not just
+  an error: a draft-or-missing project, or an unknown handle, render dedicated
+  "not found" views, while non-404 failures fall through to a generic error view.
+  This pairs with the backend's don't-confirm-existence stance (§8) — the API
+  returns 404 for "not yours," and the client treats that 404 as a clean signal.
+
+### Contract coupling worth knowing
+
+The frontend's Zod schemas are a hand-maintained mirror of the backend DTOs, not
+generated from them. They stay slightly more lenient than the wire on purpose in
+one spot (`gitHubUrl`), and slightly stricter in another (form input validates
+before submit). The `PROJECT_DOMAINS` list and the `Domain` strings the backend
+stores must agree by hand — there's no shared source. If a DTO changes, the
+matching schema in `src/types` is the thing to update.
+
+### Deployment
+
+The frontend ships as a two-stage Docker image (Node build → nginx runtime); the
+same image runs under Docker Compose locally and on Fly.io in production. nginx
+serves the static build and reverse-proxies `/api` to the backend over the
+private network, which is why the SPA is same-origin in production and
+`VITE_API_BASE_URL` is left empty there. Details in `frontend/README.md`.
 
 ---
 
-## 3. Configuration & startup
+## 4. Configuration & startup
 
 `Program.cs` is the composition root and boots in two phases: register services
 and bind/validate configuration on the builder, then assemble the middleware
@@ -112,7 +85,7 @@ Three values are environment-specific and must be set for any non-local deploy:
 
 ---
 
-## 4. Data model
+## 5. Data model
 
 Two entities, one relationship.
 
@@ -142,7 +115,7 @@ independent details.
 
 ---
 
-## 5. Schema evolution (migrations)
+## 6. Schema evolution (migrations)
 
 `Migrations/` is a generated, append-only ledger — never hand-edited. The schema
 evolved across four migrations; the narrative matters because two steps encode
@@ -169,7 +142,7 @@ deliberate decisions that look accidental in a diff.
 
 ---
 
-## 6. Error handling & exceptions
+## 7. Error handling & exceptions
 
 Errors are modeled as **domain exceptions thrown from services**, caught by a
 single `GlobalExceptionHandler` (`Middleware`) registered first in the pipeline.
@@ -189,11 +162,11 @@ The mapping:
 Note the 401 comes from a framework type (`UnauthorizedAccessException`), not a
 custom exception — the taxonomy is three custom types + one BCL type + the
 catch-all. `ForbiddenAccessException` is wired to 403 but currently unused;
-cross-tenant access deliberately uses `NotFoundException` instead (see §7).
+cross-tenant access deliberately uses `NotFoundException` instead (see §8).
 
 ---
 
-## 7. Security posture
+## 8. Security posture
 
 The backend takes a consistent **don't-confirm-existence** stance, implemented as
 uniform error messages across three independent surfaces:
@@ -224,7 +197,7 @@ publicly reachable.
 
 ---
 
-## 8. Open questions
+## 9. Open questions
 
 - **ML inference integration (§1).** How and when the backend calls the
   ml-service is undecided — the July-vs-August scoping decision. The integration
