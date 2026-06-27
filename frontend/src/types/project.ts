@@ -6,9 +6,9 @@
  * endpoint and DTO it corresponds to. Runtime parsing happens at the API-client
  * boundary (`src/api/*`); everything downstream consumes the inferred types.
  *
- * Convention: schemas validate what crosses the wire, so they intentionally
- * tolerate backend/frontend deploy skew (see `gitHubUrl` below) rather than
- * mirroring the C# types byte-for-byte.
+ * Convention: schemas validate what crosses the wire. Where a schema is more
+ * lenient than the DTO (see `gitHubUrl`), that leniency is called out as such —
+ * it is not a general "absorb arbitrary backend drift" policy.
  */
 import { z } from "zod";
 
@@ -44,12 +44,12 @@ export const projectSchema = z.object({
   description: z.string(),
   domain: z.string(), // one of PROJECT_DOMAINS; not enum-constrained here (see Domain note)
   modelType: z.string(),
-  /**
-   * Nullable *and* optional by design. `.nullable()` accepts the backend's
-   * explicit `null`; `.optional()` tolerates the key being absent entirely —
-   * which happens during the window where the frontend ships before the backend
-   * redeploys `GitHubUrl` on Fly. Without `.optional()`, that skew throws on parse.
-   */
+  // Matches ProjectResponseDto.GitHubUrl (string?). The backend always sends the
+  // key — default JSON serialization, no null-omission configured in Program.cs —
+  // so a null arrives as `"gitHubUrl": null`, never an absent key. That makes
+  // .nullable() the load-bearing modifier. .optional() is harmless defensive slack
+  // for an absent-key case the current contract never emits; safe to drop if you
+  // want the schema to mirror the DTO exactly.
   gitHubUrl: z.string().nullable().optional(),
   createdAt: z.coerce.date(),
   ownerId: z.number(),
