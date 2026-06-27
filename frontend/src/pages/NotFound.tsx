@@ -1,9 +1,12 @@
+/**
+ * Route-level 404 — the catch-all for `App.tsx`'s `path="*"`. Renders inside
+ * RootLayout, so the navbar stays and the visitor isn't stranded. Distinct from
+ * ProjectDetail's "not found" view, which is the published-or-missing case for a
+ * specific project id; this one is for an unmatched URL.
+ */
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 
-// route-level 404 (App.tsx path="*"). Renders inside RootLayout, so the navbar
-// stays - the visitor isn't stranded. Distinct from ProjectDetail's "not found"
-// view, which is the published-or-missing case for a specific project id.
 export default function NotFound() {
   const location = useLocation();
 

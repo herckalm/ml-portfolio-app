@@ -1,3 +1,8 @@
+/**
+ * Presentational card for a single project. Pure display — no data fetching, no
+ * mutations; any action buttons are injected by the parent via `actions`, so the
+ * card stays reusable across owner and public contexts.
+ */
 import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
 import {
@@ -11,6 +16,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import type { Project } from "@/types/project";
 
+// Module-scoped so the formatter is created once, not per render.
 const dateFmt = new Intl.DateTimeFormat(undefined, {
   year: "numeric",
   month: "short",
@@ -19,11 +25,16 @@ const dateFmt = new Intl.DateTimeFormat(undefined, {
 
 type ProjectCardProps = {
   project: Project;
+  /** Show the Published/Draft badge — only meaningful in the owner's view. */
   showStatus?: boolean;
-  // when true, the detail link carries ownership intent + the full project, so
-  // ProjectDetail shows the owner band and can render even a draft (which the
-  // public GET would 404).
+  /**
+   * Marks this as the owner's own card. When true, the detail link carries
+   * `{ owned, project }` in router state — which lets ProjectDetail render the
+   * owner band *and* display a draft directly, bypassing the public GET that
+   * would 404 on an unpublished project. See ProjectDetail for the consuming side.
+   */
   owned?: boolean;
+  /** Optional footer actions (publish toggle, edit, delete), injected by parent. */
   actions?: ReactNode;
 };
 
@@ -65,7 +76,7 @@ export function ProjectCard({
             href={project.gitHubUrl}
             target="_blank"
             rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()} // don't trigger the card's title link
             className="inline-flex items-center gap-1 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
             aria-label={`View source code for ${project.title}`}
           >

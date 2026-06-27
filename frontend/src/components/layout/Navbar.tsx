@@ -1,17 +1,22 @@
+/**
+ * Top navigation bar. Renders a different action set depending on auth state,
+ * driven by {@link useAuth}: brand + Dashboard/Settings/Log-out when signed in,
+ * Log-in/Sign-up when not.
+ */
 import { Link, useNavigate } from "react-router-dom";
 import { Boxes, LogOut, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/auth/AuthContext";
 
 export function Navbar() {
-  // reactive now: useAuth() re-renders this on login/logout, so the navbar flips
-  // instantly without a full-page reload.
+  // Reactive: useAuth() re-renders this on login/logout, so the navbar flips
+  // instantly — no full-page reload needed to swap the action set.
   const { isAuthed, logout } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = () => {
-    logout(); // clears token + session, flips isAuthed
-    navigate("/"); // soft client nav home — no window.location reload
+    logout(); // clears token + session, wipes the query cache, flips isAuthed
+    navigate("/"); // soft client-side nav — deliberately not a window.location reload
   };
 
   return (

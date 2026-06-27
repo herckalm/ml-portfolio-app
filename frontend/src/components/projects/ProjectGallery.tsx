@@ -1,3 +1,20 @@
+/**
+ * Reusable grid of {@link ProjectCard}s with filter, pagination, and the full
+ * set of load states (error / loading skeletons / empty / filtered-empty). Fully
+ * controlled and presentational: the parent owns the data and pagination, passing
+ * `projects`/`total`/`page` in and handling `onPageChange`. Used by both the owner
+ * dashboard and public profile, configured via `owned`, `showStatus`, and a
+ * `renderActions` callback that injects per-card buttons.
+ *
+ * @remarks
+ * The domain filter is **client-side and page-local**: it filters only the
+ * current page's `projects` array, not the full result set on the server.
+ * Pagination is server-side (`total`/`pageSize`). The two interact, which is why
+ * there are two distinct empty states — `projects.length === 0` (nothing on this
+ * page at all) vs `visible.length === 0` (this page has projects, but none in the
+ * selected domain, offering a "clear filter" escape). A domain absent from the
+ * current page but present on another page won't appear until that page loads.
+ */
 import { useState, type ReactNode } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -115,6 +132,7 @@ export function ProjectGallery({
   );
 }
 
+/** Responsive 1/2/3-column grid wrapper, shared by the loading and loaded states. */
 function GridShell({ children }: { children: ReactNode }) {
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{children}</div>

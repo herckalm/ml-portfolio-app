@@ -1,3 +1,10 @@
+/**
+ * Landing page (index route). Auth-aware hero, not a project feed: the contract
+ * has no global "all published projects" endpoint (GET /api/projects is the
+ * caller's own; the public list is per-handle), so there's nothing to feed here.
+ * CTAs branch on session — dashboard + own profile when signed in, register/login
+ * when not.
+ */
 import { Link } from "react-router-dom";
 import { ArrowRight, Boxes } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -5,10 +12,6 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/auth/AuthContext";
 import { PROJECT_DOMAINS } from "@/types/project";
 
-// Landing page (index route). No global "all published projects" endpoint exists
-// in the contract (GET /api/projects is mine-only; the public list is per-handle),
-// so this is an auth-aware hero rather than a feed. CTAs branch on the session:
-// logged in -> dashboard + own public profile; logged out -> register / login.
 export default function Home() {
   const { isAuthed, user } = useAuth();
 
@@ -61,8 +64,8 @@ export default function Home() {
         )}
       </div>
 
-      {/* the domains the hub is built around - same source of truth the filter
-          and the create form use (PROJECT_DOMAINS). */}
+      {/* Domains the hub is built around — same source of truth the filter and
+          the create form use (PROJECT_DOMAINS). */}
       <div className="flex flex-wrap items-center justify-center gap-2 pt-4">
         {PROJECT_DOMAINS.map((d) => (
           <Badge key={d} variant="secondary">

@@ -1,3 +1,21 @@
+/**
+ * Create/edit project form at `/projects/new` and `/projects/:id/edit`. One
+ * component serves both modes, keyed off the presence of a route `:id`.
+ *
+ * @remarks
+ * - **Source resolution (edit mode).** The project to edit is taken from router
+ *   state when the user arrived from an owner surface (no refetch), and only
+ *   falls back to fetching by id when state is absent (e.g. a hard page reload).
+ *   Because drafts 404 on the public GET, that fallback can fail for an
+ *   unpublished project — hence the explicit "start the edit from your dashboard"
+ *   error, which steers the user back to a path that carries the project in state.
+ * - **Container/view split.** `ProjectForm` resolves the data and mode; the inner
+ *   `ProjectFormView` is a pure controlled form. The `key={id ?? "new"}` remounts
+ *   the view when switching between projects so its local state re-seeds.
+ * - **Validation.** The same `createProjectSchema` used at the API boundary is
+ *   reused client-side via `safeParse`, so the form enforces the exact contract
+ *   the backend expects before any request goes out.
+ */
 import { z } from "zod";
 import { useState, type ReactNode, type SubmitEvent } from "react";
 import { useNavigate, useParams, useLocation, Link } from "react-router-dom";
@@ -38,11 +56,13 @@ export default function ProjectForm() {
   const id = idParam ? Number(idParam) : undefined;
   const isEdit = id != null && !Number.isNaN(id);
 
+  // Prefer the project passed via router state; only fetch if it's missing
+  // (e.g. a hard reload on the edit URL). See file remarks (source resolution).
   const passed = (location.state as { project?: Project } | null)?.project;
   const fallback = useProject(isEdit && !passed ? id : undefined);
 
   const create = useCreateProject();
-  const update = useUpdateProject(isEdit ? id! : -1);
+  const update = useUpdateProject(isEdit ? id! : -1); // -1 is unused in create mode
   const mutation = isEdit ? update : create;
 
   const save = async (values: CreateProjectInput) => {
@@ -73,7 +93,7 @@ export default function ProjectForm() {
 
   return (
     <ProjectFormView
-      key={isEdit ? id : "new"}
+      key={isEdit ? id : "new"} // remount → re-seed local form state per project
       initial={initial}
       isEdit={isEdit}
       submitting={mutation.isPending}
@@ -84,6 +104,9 @@ export default function ProjectForm() {
 
 type FieldErrors = Partial<Record<keyof CreateProjectInput, string>>;
 
+/** Pure controlled form. Owns input state and validation; delegates persistence
+ *  to `onSubmit`. Server errors surface inline; field errors come from the
+ *  shared Zod schema. */
 function ProjectFormView({
   initial,
   isEdit,
@@ -101,13 +124,14 @@ function ProjectFormView({
 
   const set = (key: keyof CreateProjectInput, value: string) => {
     setForm((f) => ({ ...f, [key]: value }));
-    if (errors[key]) setErrors((e) => ({ ...e, [key]: undefined }));
+    if (errors[key]) setErrors((e) => ({ ...e, [key]: undefined })); // clear on edit
   };
 
   const handleSubmit = async (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     setServerError(null);
 
+    // Validate against the contract schema before hitting the network.
     const parsed = createProjectSchema.safeParse(form);
     if (!parsed.success) {
       const fe = z.flattenError(parsed.error).fieldErrors;
@@ -250,6 +274,7 @@ function ProjectFormView({
   );
 }
 
+/** Map a fetched Project to the form's input shape (null gitHubUrl → ""). */
 function toInput(p: Project): CreateProjectInput {
   return {
     title: p.title,
@@ -260,6 +285,7 @@ function toInput(p: Project): CreateProjectInput {
   };
 }
 
+/** Labeled field wrapper; renders a child control plus optional inline error. */
 function Field({
   id,
   label,

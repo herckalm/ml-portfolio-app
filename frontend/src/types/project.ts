@@ -1,7 +1,25 @@
+/**
+ * Zod schemas and inferred types for the project/profile API contract.
+ *
+ * This is the frontend's single source of truth for response and request
+ * shapes — the TS mirror of the backend DTOs. Each schema is annotated with the
+ * endpoint and DTO it corresponds to. Runtime parsing happens at the API-client
+ * boundary (`src/api/*`); everything downstream consumes the inferred types.
+ *
+ * Convention: schemas validate what crosses the wire, so they intentionally
+ * tolerate backend/frontend deploy skew (see `gitHubUrl` below) rather than
+ * mirroring the C# types byte-for-byte.
+ */
 import { z } from "zod";
 
-// generic wrapper for any endpoint returning { items, total, page, pageSize }.
-// This is the TS mirror of my backend's PagedResult<T>.
+/**
+ * Builds a schema for any paginated endpoint returning
+ * `{ items, total, page, pageSize }`. TS mirror of the backend's
+ * `PagedResult<T>`; pass the item schema and get the page wrapper back.
+ *
+ * @example
+ * const pagedProjects = pagedResult(projectSchema);
+ */
 export function pagedResult<T extends z.ZodTypeAny>(item: T) {
   return z.object({
     items: z.array(item),
@@ -11,6 +29,7 @@ export function pagedResult<T extends z.ZodTypeAny>(item: T) {
   });
 }
 
+/** Structural type for a page of results. Mirror of {@link pagedResult}'s output. */
 export type PagedResult<T> = {
   items: T[];
   total: number;
@@ -18,17 +37,19 @@ export type PagedResult<T> = {
   pageSize: number;
 };
 
-// matches ProjectResponseDto
+/** A single project as returned by the API. Mirrors `ProjectResponseDto`. */
 export const projectSchema = z.object({
   id: z.number(),
   title: z.string(),
   description: z.string(),
-  domain: z.string(), // "NLP", "Computer Vision", ...
+  domain: z.string(), // one of PROJECT_DOMAINS; not enum-constrained here (see Domain note)
   modelType: z.string(),
-  // string when set, null when omitted. .optional() is deliberate: it tolerates
-  // a backend that hasn't been redeployed with GitHubUrl yet (absent key) instead
-  // of throwing on parse — important during the window where the frontend ships
-  // before the backend redeploy on Fly.
+  /**
+   * Nullable *and* optional by design. `.nullable()` accepts the backend's
+   * explicit `null`; `.optional()` tolerates the key being absent entirely —
+   * which happens during the window where the frontend ships before the backend
+   * redeploys `GitHubUrl` on Fly. Without `.optional()`, that skew throws on parse.
+   */
   gitHubUrl: z.string().nullable().optional(),
   createdAt: z.coerce.date(),
   ownerId: z.number(),
@@ -37,27 +58,38 @@ export const projectSchema = z.object({
 
 export type Project = z.infer<typeof projectSchema>;
 
-// reused by BOTH GET /api/projects (mine, all statuses) and
-// GET /api/users/{handle}/projects (public, published only) — same T, same shape.
+/**
+ * Page-of-projects schema, reused by **both** consumers of the same shape:
+ * `GET /api/projects` (owner's own, all statuses) and
+ * `GET /api/users/{handle}/projects` (public, published only).
+ */
 export const pagedProjectsSchema = pagedResult(projectSchema);
 export type PagedProjects = z.infer<typeof pagedProjectsSchema>;
 
-// matches UserProfileDto — GET /api/users/{handle} and the PUT /api/users/me response
+/**
+ * Public profile. Mirrors `UserProfileDto` — the response shape for both
+ * `GET /api/users/{handle}` and `PUT /api/users/me`.
+ */
 export const userProfileSchema = z.object({
   handle: z.string(),
   displayName: z.string(),
-  bio: z.string().nullable(), // contract says string|null — the backend sends null, not undefined
+  bio: z.string().nullable(), // contract is string|null — backend sends null, never undefined
   memberSince: z.coerce.date(),
 });
 
 export type UserProfile = z.infer<typeof userProfileSchema>;
 
-// POST /api/projects → 201 draft
+/** Request body for `POST /api/projects` → 201 draft. */
 export const createProjectSchema = z.object({
   title: z.string().min(1),
   description: z.string().min(1),
   domain: z.string().min(1),
   modelType: z.string().min(1),
+  /**
+   * Accepts a valid URL or empty string, then normalizes `""` → `undefined` so
+   * an untouched optional field is omitted from the payload rather than sent as
+   * an empty string the backend would have to special-case.
+   */
   gitHubUrl: z
     .url("Enter a valid URL (https://github.com/…)")
     .or(z.literal(""))
@@ -66,21 +98,25 @@ export const createProjectSchema = z.object({
 });
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
 
-// PUT /api/projects/{id} — same editable fields as create
+/** Body for `PUT /api/projects/{id}` — same editable fields as create. */
 export type UpdateProjectInput = CreateProjectInput;
 
-// PATCH /api/projects/{id}/publish
+/** Body for `PATCH /api/projects/{id}/publish`. */
 export const publishProjectSchema = z.object({ isPublished: z.boolean() });
 export type PublishProjectInput = z.infer<typeof publishProjectSchema>;
 
-// PUT /api/users/me  (bio? in the contract → optional + nullable)
+/** Body for `PUT /api/users/me`. `bio` is optional+nullable per the contract. */
 export const updateProfileSchema = z.object({
   displayName: z.string().min(1),
   bio: z.string().nullable().optional(),
 });
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 
-// UI list for the filter — must match the exact strings you store in Domain.
+/**
+ * Domain values for the UI filter. Must stay in exact string-sync with the
+ * `Domain` values persisted by the backend — these are the contract, not a
+ * display-only convenience.
+ */
 export const PROJECT_DOMAINS = [
   "NLP",
   "Computer Vision",
