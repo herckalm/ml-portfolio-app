@@ -4,24 +4,26 @@ Model-inference layer for the **ML Portfolio** application. A FastAPI service th
 loads exported model artifacts and serves predictions to the backend over the
 private network.
 
-> **Status: early scaffold.** Today this service exposes a liveness probe and
-> nothing else — no model loads and no inference route exists yet. This README
-> documents the **target architecture** (the shape the scaffold is being built
-> toward) alongside what currently exists; each section marks which is which. The
-> system-level integration decision lives in [`../backend/ARCHITECTURE.md`](../backend/ARCHITECTURE.md) §9.
+> **Status: inference path live (predictor #1).** The service exposes liveness,
+> readiness, and the inference route, with the DistilBERT CFPB classifier wired
+> as predictor #1 behind the registry. Inference is artifact-gated: with no
+> bundle mounted the process still boots and serves demo mode. Predictors #2–#4
+> remain planned. This README documents the current shape alongside the target
+> architecture; each section marks which is which. The system-level integration
+> decision lives in [`../backend/ARCHITECTURE.md`](../backend/ARCHITECTURE.md) §9.
 
 ---
 
 ## Technology stack
 
-| Technology  | Role                             | Status  |
-| ----------- | -------------------------------- | ------- |
-| FastAPI     | Web framework, routing           | in use  |
-| Uvicorn     | ASGI server                      | in use  |
-| uv          | Dependency resolution + venv     | in use  |
-| onnxruntime | ONNX inference (predictor #1)    | planned |
-| tokenizers  | HF fast tokenizer (predictor #1) | planned |
-| numpy       | Array ops on model I/O           | planned |
+| Technology  | Role                             | Status |
+| ----------- | -------------------------------- | ------ |
+| FastAPI     | Web framework, routing           | in use |
+| Uvicorn     | ASGI server                      | in use |
+| uv          | Dependency resolution + venv     | in use |
+| onnxruntime | ONNX inference (predictor #1)    | in use |
+| tokenizers  | HF fast tokenizer (predictor #1) | in use |
+| numpy       | Array ops on model I/O           | in use |
 
 The inference dependencies are deliberately **light**: serving the exported ONNX
 artifact needs `onnxruntime` + `tokenizers` + `numpy`, with no `torch` or
@@ -35,18 +37,25 @@ The service is a **pluggable predictor host**, not a single-model server. A
 registry maps a `model_id` to a _predictor_, and one uniform envelope wraps every
 result regardless of which model produced it:
 
-```
 POST /v1/models/{model_id}/predict
-        │
-        ▼
-   Registry ........ model_id → Predictor (lazy-loaded)
-        │
-        ▼
-   Predictor ....... load() / predict() / health()   ← behavioral Protocol
-        │
-        ▼
-   Envelope ........ { model_id, model_version, result, meta }
-```
+
+│
+
+▼
+
+Registry ........ model_id → Predictor (lazy-loaded)
+
+│
+
+▼
+
+Predictor ....... load() / predict() + model_loaded ← behavioral Protocol
+
+│
+
+▼
+
+Envelope ........ { model_id, model_version, result, meta }
 
 The service sits **behind the backend** — the browser never calls it directly.
 The backend owns authentication, rate-limiting, and translating this service's
@@ -56,49 +65,62 @@ integration boundary.
 ### The predictor contract
 
 Every model implements the same **behavioral `Protocol`** — structural typing, no
-base class, so the service never imports a concrete model class:
+base class, so the service never imports a concrete model class. A predictor
+exposes three read-only properties and two methods:
 
 ```python
-from typing import Protocol, runtime_checkable, TypedDict, Any
+from typing import Protocol, runtime_checkable
 
-
-class HealthInfo(TypedDict):
-    model_loaded: bool          # False until load() succeeds
-    model_version: str | None
-    kind: str                   # "onnx" | "sklearn" | "external-api" | ...
+from app.schemas import PredictionResult
 
 
 @runtime_checkable
 class Predictor(Protocol):
     """Behavioral contract every model in the host implements.
 
-    A class is a Predictor if it has these methods with compatible
+    A class is a Predictor if it has these members with compatible
     signatures — it does not inherit from anything. Each model project
     supplies its own implementation; the service depends only on this shape.
     """
 
-    def load(self, artifact_dir: str) -> None:
-        """Construct the model from its artifact bundle.
+    @property
+    def model_id(self) -> str: ...
 
-        Must be safe to call when the bundle is absent: on failure, leave the
-        predictor un-ready rather than raising. The readiness gate depends on
-        this — a missing artifact must not crash the process.
+    @property
+    def model_version(self) -> str: ...
+
+    @property
+    def model_loaded(self) -> bool:
+        """False until load() succeeds; gates readiness and demo mode."""
+        ...
+
+    def load(self) -> None:
+        """Lazily construct the model from its artifact bundle.
+
+        The artifact directory is supplied at construction time (the registry
+        builds each predictor with its resolved path), so load() takes no
+        argument. Must be safe when the bundle is absent: on a missing artifact,
+        leave the predictor un-ready rather than raising — a missing artifact
+        must not crash the process.
         """
         ...
 
-    def health(self) -> HealthInfo:
-        """Report readiness. `model_loaded` is False until `load()` succeeds."""
-        ...
-
-    def predict(self, payload: Any) -> Any:
-        """Synchronous inference. Input/output types are project-specific;
-        the service wraps the return value in the response envelope.
+    def predict(self, text: str) -> PredictionResult:
+        """Synchronous inference. The result type is project-specific; the
+        service wraps the return value in the response envelope. The router
+        guarantees model_loaded is True before calling this.
         """
         ...
 
-    # Streaming models (the generative project) additionally implement:
-    # def predict_stream(self, payload: Any) -> Iterator[str]: ...
+    # Streaming models (the generative project) will additionally implement:
+    # def predict_stream(self, text: str) -> Iterator[str]: ...
 ```
+
+Readiness is read directly from `model_loaded` (and `model_version`) per model;
+the registry constructs predictors lazily and caches them. A future enhancement
+may add a `kind` discriminator (`"onnx" | "sklearn" | "external-api" | ...`) to
+the readiness payload so operators can see each predictor's type at a glance;
+it is not implemented today.
 
 ### Why a Protocol, not a fixed schema
 
@@ -130,36 +152,47 @@ is project-local.
 
 ## Project structure
 
-Current scaffold:
-
-```
 ml-service/
+
 ├── app/
-│   ├── __init__.py
-│   ├── main.py              # FastAPI app + root route
-│   └── routers/
-│       ├── __init__.py
-│       └── health.py        # liveness probe
-├── Dockerfile               # multi-stage uv build, non-root runtime
+
+│ ├── init.py
+
+│ ├── main.py # FastAPI app + root route
+
+│ ├── registry.py # model_id → Predictor, lazy loading
+
+│ ├── schemas.py # request models + response envelope (Pydantic)
+
+│ ├── cleaning.py # vendored from ml-portfolio-models (frozen contract)
+
+│ ├── predictors/
+
+│ │ ├── init.py # the Predictor Protocol
+
+│ │ └── distilbert.py # predictor #1 (DistilBERT CFPB, ONNX)
+
+│ └── routers/
+
+│ ├── init.py
+
+│ ├── health.py # liveness + readiness
+
+│ └── predict.py # POST /v1/models/{model_id}/predict
+
+├── tests/ # cleaning unit tests + API contract tests
+
+├── Dockerfile # multi-stage uv build, non-root runtime
+
 ├── pyproject.toml
+
 ├── uv.lock
+
 └── README.md
-```
 
-Target layout (planned modules in **bold**):
-
-```
-app/
-├── main.py
-├── **registry.py**          # model_id → Predictor, lazy loading
-├── **schemas.py**           # request models + response envelope (Pydantic)
-├── **cleaning.py**          # vendored from ml-portfolio-models (frozen contract)
-├── **predictors/**          # one module per model, each implements Predictor
-│   └── **distilbert.py**    # predictor #1
-└── routers/
-    ├── health.py
-    └── **predict.py**       # POST /v1/models/{model_id}/predict
-```
+Planned modules (predictors #2–#4) land as additional files under
+`app/predictors/`, each implementing the same `Predictor` Protocol plus a one-row
+registry entry — no change to the service shape.
 
 ---
 
@@ -177,6 +210,17 @@ uv sync
 uv run uvicorn app.main:app --reload --port 8000
 ```
 
+### Test & lint
+
+```bash
+uv run pytest          # cleaning unit tests + API contract tests
+uvx ruff check .
+```
+
+The live-inference test is skipped automatically unless the DistilBERT bundle is
+present at the resolved artifacts path; the contract tests (404/422/503,
+readiness, envelope) run without any artifact.
+
 ### Run (Docker)
 
 ```bash
@@ -191,21 +235,25 @@ curl localhost:8000/health
 # {"status":"healthy"}
 ```
 
-### Artifact mounting (planned)
+### Artifact mounting
 
 The model bundle lives in the separate `ml-portfolio-models` repo, is gitignored,
 and is ~268 MB — it **never travels through git** into this repo. It is mounted
-into the container at runtime:
+into the container at runtime, under a per-domain subdirectory keyed by the
+predictor:
 
 ```bash
 docker run -p 8000:8000 \
-  -v /path/to/export:/artifacts/distilbert-cfpb \
+  -v /path/to/export:/artifacts/nlp/distilbert-cfpb \
   -e ARTIFACTS_DIR=/artifacts \
   ml-service
 ```
 
-With no artifact mounted, the service still starts and serves demo mode (see
-below). Object-store pull (versioned, checksum-verified) is the production target.
+The registry resolves each model to `${ARTIFACTS_DIR}/<relative_path>` (for
+predictor #1, `nlp/distilbert-cfpb`), keeping the public `model_id` decoupled from
+the on-disk layout. With no artifact mounted, the service still starts and serves
+demo mode (see below). Object-store pull (versioned, checksum-verified) is the
+production target.
 
 ---
 
@@ -213,17 +261,23 @@ below). Object-store pull (versioned, checksum-verified) is the production targe
 
 ### Current
 
-| Method | Endpoint  | Description                                        |
-| ------ | --------- | -------------------------------------------------- |
-| GET    | `/`       | Service identity + liveness                        |
-| GET    | `/health` | Liveness probe — the process is up (Docker target) |
+| Method | Endpoint                        | Description                                        |
+| ------ | ------------------------------- | -------------------------------------------------- |
+| GET    | `/`                             | Service identity + liveness                        |
+| GET    | `/health`                       | Liveness probe — the process is up (Docker target) |
+| GET    | `/health/ready`                 | Readiness — reports `model_loaded` per model       |
+| POST   | `/v1/models/{model_id}/predict` | Inference; result wrapped in the envelope          |
 
 ### Planned
 
-| Method | Endpoint                        | Description                                  |
-| ------ | ------------------------------- | -------------------------------------------- |
-| GET    | `/health/ready`                 | Readiness — reports `model_loaded` per model |
-| POST   | `/v1/models/{model_id}/predict` | Inference; result wrapped in the envelope    |
+| Method | Endpoint                               | Description                              |
+| ------ | -------------------------------------- | ---------------------------------------- |
+| POST   | `/v1/models/{model_id}/predict_stream` | Streaming inference (generative project) |
+
+**Readiness** (`GET /health/ready`) is informational and always returns `200`;
+it reports `model_loaded` and `model_version` per registered model so operators
+can see which artifacts are loaded. The per-request `503` on `/predict` is what
+actually gates demo mode.
 
 **Response envelope** (all models):
 
@@ -232,7 +286,7 @@ below). Object-store pull (versioned, checksum-verified) is the production targe
   "model_id": "distilbert-cfpb",
   "model_version": "1.0.0",
   "result": { "...": "model-specific" },
-  "meta": { "demo_mode": false }
+  "meta": { "demo_mode": false, "input_chars": 57 }
 }
 ```
 
@@ -243,17 +297,23 @@ below). Object-store pull (versioned, checksum-verified) is the production targe
 { "text": "My credit card was charged twice for the same transaction." }
 
 // result
-{ "label": "credit_card", "score": 0.94, "calibrated": true, "confidence_band": "high" }
+{ "label": "Credit card", "score": 0.94, "calibrated": true, "confidence_band": "high" }
 ```
 
-The frontend renders `confidence_band` (`"high"` / `"low"`), **never the raw
-score** — a low-confidence prediction surfaces as "please review," not a
-misleading percentage. The calibration threshold is owned by the service (from the
-artifact's `calibration.json`), not the caller.
+Labels are the artifact's own class names (`config.json` `id2label`): `Credit
+reporting`, `Debt collection`, `Mortgage`, `Credit card`, `Checking or savings
+account`. The frontend renders `confidence_band` (`"high"` / `"low"`), **never the
+raw score** — a low-confidence prediction surfaces as "please review," not a
+misleading percentage. The score is temperature-calibrated (T≈1.5, from the
+artifact's `calibration.json`); the band threshold is owned by the service
+(default `0.75`, overridable via an optional `band_threshold` in
+`calibration.json`), not the caller.
 
 **Error behavior:**
 
-- Inputs below the cleaning contract's `MIN_CHARS` floor → `422`.
+- Inputs below the cleaning contract's `MIN_CHARS` floor (checked on the cleaned
+  text) → `422`.
+- Unknown `model_id` → `404`.
 - When a model isn't loaded → `503` from this service; the backend proxy converts
   that into a `200` demo-mode envelope (`meta.demo_mode = true`) so the product
   degrades gracefully rather than erroring. This service emits FastAPI-native
@@ -283,7 +343,9 @@ residue and has been removed.)
 
 **Calibration-aware responses.** The service surfaces a calibrated confidence
 _band_, not a raw probability, because the model's score is only trustworthy at
-the high end.
+the high end. Logits are divided by the artifact's temperature before softmax
+(Guo et al., 2017), which recalibrates the score without changing the predicted
+label.
 
 **Vendored input cleaning.** The model was trained on text run through a fixed
 cleaning contract (Unicode normalization, control-char stripping, whitespace
@@ -312,9 +374,10 @@ the readiness gate and demo mode work. This is deliberate, not an inconsistency.
 
 ## Future work
 
-- **The inference path itself** — registry, predictor, response schema, cleaning
-  module, and the `/v1/models/{id}/predict` + `/health/ready` routes. None exist
-  yet; the scaffold is health-only.
-- **Predictor #1 (DistilBERT)** — wire the exported ONNX bundle to the Protocol.
 - **Predictors #2–#4** — CV (image classification), clustering, and the external
   LLM generative project, each landing as another predictor against the same host.
+- **Streaming** — `predict_stream` + the `/predict_stream` route for the
+  generative project.
+- **Readiness `kind` discriminator** — surface each predictor's type
+  (`onnx`/`sklearn`/`external-api`) in `/health/ready`.
+- **CI** — wire the `pytest` step into the `ml-service` job (currently lint-only).

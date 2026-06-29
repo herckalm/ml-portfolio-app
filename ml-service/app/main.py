@@ -1,5 +1,6 @@
 from fastapi import FastAPI
-from app.routers import health
+
+from app.routers import health, predict
 
 app = FastAPI(
     title="ML Service",
@@ -8,6 +9,7 @@ app = FastAPI(
 )
 
 app.include_router(health.router)
+app.include_router(predict.router)
 
 
 @app.get("/")
