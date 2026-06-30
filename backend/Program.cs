@@ -11,6 +11,7 @@
 
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.Extensions.Options;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using MlPortfolio.Api.Configuration;
@@ -68,6 +69,26 @@ if (string.IsNullOrWhiteSpace(jwtOptions.Issuer))
     throw new InvalidOperationException("Jwt:Issuer is not configured.");
 if (string.IsNullOrWhiteSpace(jwtOptions.Audience))
     throw new InvalidOperationException("Jwt:Audience is not configured.");
+
+// ML inference service — bind options and validate at startup, same fail-fast
+// posture as JWT. The typed HttpClient (added in a later step) consumes these
+// via IOptions; a missing or malformed BaseUrl stops the boot here.
+builder.Services.AddOptions<MlServiceOptions>()
+    .BindConfiguration(MlServiceOptions.SectionName)
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+// Typed HttpClient for the ml-service. BaseAddress + Timeout come from the
+// validated MlServiceOptions; IHttpClientFactory owns the handler lifetime.
+// The trailing slash on BaseAddress is required so the client's relative URI
+// (v1/models/{id}/predict) resolves without dropping a segment.
+builder.Services.AddHttpClient<IMlServiceClient, MlServiceClient>((provider, http) =>
+{
+    var options = provider.GetRequiredService<IOptions<MlServiceOptions>>().Value;
+    var baseUrl = options.BaseUrl.EndsWith('/') ? options.BaseUrl : options.BaseUrl + "/";
+    http.BaseAddress = new Uri(baseUrl);
+    http.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+});
 
 // Application services — all scoped (per-request lifetime), matching the DbContext.
 builder.Services.AddScoped<JwtService>();
