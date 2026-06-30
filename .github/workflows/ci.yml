@@ -85,9 +85,9 @@ jobs:
       - run: dotnet restore
       - run: dotnet build --no-restore -c Release
 
-  # 4) ml-service: sync (asserts lockfile) -> ruff lint. No tests yet.
+  # 4) ml-service: sync (asserts lockfile) -> ruff lint.
   ml-service:
-    name: ML service (lint)
+    name: ML service (lint + test)
     needs: changes
     if: ${{ needs.changes.outputs.ml-service == 'true' }}
     runs-on: ubuntu-latest
@@ -101,6 +101,7 @@ jobs:
           enable-cache: true
       - run: uv sync --locked
       - run: uvx ruff check .
+      - run: uv run pytest
 
   # 4b) Backend integration: boot the real compose stack, run the smoke test.
   integration:
