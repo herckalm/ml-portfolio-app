@@ -48,3 +48,6 @@ Thumbs.db
 not-for-git/
 **/.gitkeep
 Fly_Postgres.doc
+
+# ML model artifacts (binary blobs — never commit)
+ml-service/artifacts/
