@@ -4,14 +4,13 @@ Covers the error contract this service owns — 404 (unknown model), 422 (input
 below MIN_CHARS after cleaning), 503 (model registered but not loaded) — plus
 liveness, readiness, and the response-envelope shape on the demo path.
 
-A live 200 prediction needs the ~268 MB artifact mounted, which is gitignored
-and absent in CI, so that case is skipped unless the bundle is present.
+A live 200 prediction needs the ~268 MB artifact mounted. That case is gated by
+the `live_artifacts` fixture, which skips unless LIVE_ARTIFACTS_DIR points at a
+real bundle — so it stays hermetic in CI and needs no symlink locally.
 """
 
 from __future__ import annotations
 
-import pytest
-from app import registry
 from app.main import app
 from fastapi.testclient import TestClient
 
@@ -60,19 +59,13 @@ def test_predict_not_loaded_503(empty_artifacts):
     assert r.status_code == 503
 
 
-def _artifact_present() -> bool:
-    """True only if the real distilbert-cfpb bundle is at the default path."""
-    bundle = registry.artifacts_dir() / "nlp" / "distilbert-cfpb" / "model.onnx"
-    return bundle.is_file()
+def test_predict_success_envelope(live_artifacts):
+    """Live inference — runs only when LIVE_ARTIFACTS_DIR points at a bundle.
 
-
-@pytest.mark.skipif(
-    not _artifact_present(),
-    reason="distilbert-cfpb artifact not mounted; live inference test skipped.",
-)
-def test_predict_success_envelope():
-    """Live inference — runs only when the artifact is present locally."""
-    registry._INSTANCES.clear()
+    The `live_artifacts` fixture points ARTIFACTS_DIR at the real bundle and
+    resets the predictor cache before and after, so this resolves a freshly
+    loaded predictor and leaks nothing into later tests.
+    """
     r = client.post(
         "/v1/models/distilbert-cfpb/predict", json={"text": _LONG_COMPLAINT}
     )
