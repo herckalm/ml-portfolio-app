@@ -10,6 +10,7 @@ import Settings from "@/pages/Settings";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import NotFound from "@/pages/NotFound";
+import Predict from "@/pages/Predict";
 
 // guards AUTH-only routes. Reactive via useAuth(), so a logout re-renders this
 // guard and bounces you immediately.
@@ -30,6 +31,7 @@ export default function App() {
         <Route index element={<Home />} />
         <Route path="u/:handle" element={<PublicProfile />} />
         <Route path="projects/:id" element={<ProjectDetail />} />
+        <Route path="predict" element={<Predict />} />
 
         {/* AUTH-only branch — everything inside requires a session */}
         <Route element={<ProtectedRoute />}>
