@@ -29,6 +29,11 @@ import {
   type UpdateProjectInput,
   type UpdateProfileInput,
 } from "@/types/project";
+import {
+  predictEnvelopeSchema,
+  type PredictEnvelope,
+  type PredictRequest,
+} from "@/types/predict";
 
 const TOKEN_KEY = "mlp_token";
 
@@ -174,6 +179,27 @@ export const projectsApi = {
   /** DELETE /api/projects/{id} — auth, owner only → 204 (no body). */
   remove: async (id: number): Promise<void> => {
     await api.delete(`/api/projects/${id}`);
+  },
+};
+
+/**
+ * Raw inference endpoint. Public, no auth (the request interceptor still attaches
+ * a token if one happens to be present — harmless, the server ignores it). Parses
+ * the snake_case envelope through Zod; failures reject as ApiError like everything
+ * else, so the error path picks up RFC 7807 shaping for free once the backend
+ * 422/404 thread lands.
+ */
+export const predictApi = {
+  /** POST /api/predict/{modelId} — public. Returns the inference envelope. */
+  predict: async (
+    modelId: string,
+    input: PredictRequest,
+  ): Promise<PredictEnvelope> => {
+    const { data } = await api.post(
+      `/api/predict/${encodeURIComponent(modelId)}`,
+      input,
+    );
+    return predictEnvelopeSchema.parse(data);
   },
 };
 
