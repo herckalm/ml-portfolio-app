@@ -43,6 +43,8 @@ public class GlobalExceptionHandler : IExceptionHandler
             ForbiddenAccessException => (StatusCodes.Status403Forbidden, "Forbidden"),
             ConflictException => (StatusCodes.Status409Conflict, "Conflict"),
             UnauthorizedAccessException => (StatusCodes.Status401Unauthorized, "Unauthorized"),
+            MlServiceModelNotFoundException => (StatusCodes.Status404NotFound, "Model Not Found"),
+            MlServiceValidationException => (StatusCodes.Status422UnprocessableEntity, "Validation Failed"),
             _ => (StatusCodes.Status500InternalServerError, "Internal Server Error")
         };
 

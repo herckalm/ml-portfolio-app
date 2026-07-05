@@ -45,6 +45,7 @@ services:
       Jwt__Issuer: ml-portfolio-api
       Jwt__Audience: ml-portfolio-client
       Jwt__ExpiryHours: "24"
+      MlService__BaseUrl: "http://ml-service:8000"
     depends_on:
       postgres:
         condition: service_healthy

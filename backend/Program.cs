@@ -161,3 +161,9 @@ app.MapGet("/health/db", async (AppDbContext db) =>
 });
 
 app.Run();
+
+// Exposes the implicit top-level Program class to the test assembly so
+// WebApplicationFactory<Program> can boot the real app in-process. Top-level
+// statements generate an *internal* Program by default; this partial makes it
+// public without changing any behavior.
+public partial class Program { }
