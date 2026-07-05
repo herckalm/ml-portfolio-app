@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using MlPortfolio.Api.Exceptions;
 using MlPortfolio.Api.Services;
 
 namespace MlPortfolio.Api.Tests;
@@ -7,7 +8,9 @@ namespace MlPortfolio.Api.Tests;
 /// <summary>
 /// Unit tests for <see cref="MlServiceClient"/> using a stub HttpMessageHandler —
 /// no real network, no app boot. Locks the two halves of the client's contract:
-/// the request it emits, and how it parses the envelope it receives.
+/// the request it emits, and how it parses the envelope it receives — plus the
+/// error contract: each upstream status maps to a typed exception carrying the
+/// upstream `detail`, which GlobalExceptionHandler later echoes into RFC 7807.
 /// </summary>
 public class MlServiceClientTests
 {
@@ -52,6 +55,93 @@ public class MlServiceClientTests
         Assert.Contains("\"text\":\"hello there\"", handler.CapturedBody);
     }
 
+    // --- Error contract: status → typed exception, upstream `detail` preserved ---
+
+    [Fact]
+    public async Task PredictAsync_On404_ThrowsModelNotFound_WithUpstreamDetail()
+    {
+        const string detail = "Unknown model_id 'bogus'.";
+        var handler = new StubHandler(Error(HttpStatusCode.NotFound, $$"""{"detail": "{{detail}}"}"""));
+        var client = ClientFor(handler);
+
+        var ex = await Assert.ThrowsAsync<MlServiceModelNotFoundException>(
+            () => client.PredictAsync("bogus", "My credit card was charged twice."));
+
+        // Message == upstream detail → GlobalExceptionHandler echoes it into 7807.
+        Assert.Equal(detail, ex.Message);
+    }
+
+    [Fact]
+    public async Task PredictAsync_On422_ThrowsValidation_WithUpstreamDetail()
+    {
+        const string detail = "Input too short after cleaning: need at least 10 characters, got 4.";
+        var handler = new StubHandler(Error(HttpStatusCode.UnprocessableEntity, $$"""{"detail": "{{detail}}"}"""));
+        var client = ClientFor(handler);
+
+        var ex = await Assert.ThrowsAsync<MlServiceValidationException>(
+            () => client.PredictAsync("distilbert-cfpb", "XX"));
+
+        Assert.Equal(detail, ex.Message);
+    }
+
+    [Fact]
+    public async Task PredictAsync_On503_ThrowsUnavailable_WithUpstreamDetail()
+    {
+        // The controller catches THIS to serve demo mode; the client just reports it.
+        const string detail = "Model 'distilbert-cfpb' is not loaded (artifact unavailable).";
+        var handler = new StubHandler(Error(HttpStatusCode.ServiceUnavailable, $$"""{"detail": "{{detail}}"}"""));
+        var client = ClientFor(handler);
+
+        var ex = await Assert.ThrowsAsync<MlServiceUnavailableException>(
+            () => client.PredictAsync("distilbert-cfpb", "My credit card was charged twice."));
+
+        Assert.Equal(detail, ex.Message);
+    }
+
+    [Fact]
+    public async Task PredictAsync_On422ArrayDetail_ExtractsFirstMessage()
+    {
+        // FastAPI's *automatic* validation form: detail is an array of error objects.
+        var body = """{"detail": [{"loc": ["body", "text"], "msg": "field required"}]}""";
+        var handler = new StubHandler(Error(HttpStatusCode.UnprocessableEntity, body));
+        var client = ClientFor(handler);
+
+        var ex = await Assert.ThrowsAsync<MlServiceValidationException>(
+            () => client.PredictAsync("distilbert-cfpb", ""));
+
+        Assert.Equal("field required", ex.Message);
+    }
+
+    [Fact]
+    public async Task PredictAsync_OnUnmappedStatus_ThrowsBaseException()
+    {
+        // A status the contract doesn't define (upstream 500) → base type → global 500.
+        var handler = new StubHandler(Error(HttpStatusCode.InternalServerError, """{"detail": "boom"}"""));
+        var client = ClientFor(handler);
+
+        var ex = await Assert.ThrowsAsync<MlServiceException>(
+            () => client.PredictAsync("distilbert-cfpb", "My credit card was charged twice."));
+
+        // Base type exactly — not one of the three mapped subclasses.
+        Assert.Equal(typeof(MlServiceException), ex.GetType());
+        Assert.Contains("500", ex.Message);
+        Assert.Contains("boom", ex.Message);
+    }
+
+    [Fact]
+    public async Task PredictAsync_OnNonJsonErrorBody_FallsBackWithoutThrowingParseError()
+    {
+        // A proxy HTML error page, not JSON — extraction must degrade, not crash.
+        var handler = new StubHandler(Error(HttpStatusCode.BadGateway, "<html>502 Bad Gateway</html>"));
+        var client = ClientFor(handler);
+
+        var ex = await Assert.ThrowsAsync<MlServiceException>(
+            () => client.PredictAsync("distilbert-cfpb", "My credit card was charged twice."));
+
+        // 502 is unmapped → base exception; the message carries the fallback detail.
+        Assert.Contains("502", ex.Message);
+    }
+
     private static MlServiceClient ClientFor(StubHandler handler) =>
         new(new HttpClient(handler) { BaseAddress = new Uri("http://ml-service.test/") });
 
@@ -60,7 +150,11 @@ public class MlServiceClientTests
         Content = new StringContent(json, Encoding.UTF8, "application/json")
     };
 
-    /// <summary>Captures the outgoing request and returns a fixed response.</summary>
+    private static HttpResponseMessage Error(HttpStatusCode status, string json) => new(status)
+    {
+        Content = new StringContent(json, Encoding.UTF8, "application/json")
+    };
+
     private sealed class StubHandler : HttpMessageHandler
     {
         private readonly HttpResponseMessage _response;
