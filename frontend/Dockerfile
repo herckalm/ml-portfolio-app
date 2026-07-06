@@ -1,4 +1,3 @@
-
 # build: compile the React/TS app into static files
 FROM node:22-slim AS build
 WORKDIR /app
@@ -23,8 +22,10 @@ COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 80
 
 
+# Probe over IPv4 explicitly: `localhost` resolves to ::1 first, but nginx
+# only listens on IPv4 :80, so an IPv6 probe gets connection-refused.
 HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --quiet --spider http://localhost:80/ || exit 1
+    CMD wget --quiet --spider http://127.0.0.1:80/ || exit 1
 
 # nginx must run in the foreground (daemon off) so it stays PID 1 in the container.
 CMD ["nginx", "-g", "daemon off;"]
