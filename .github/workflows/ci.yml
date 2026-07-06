@@ -24,6 +24,7 @@ jobs:
       backend: ${{ steps.filter.outputs.backend }}
       ml-service: ${{ steps.filter.outputs.ml-service }}
       integration: ${{ steps.filter.outputs.integration }}
+      real-pull: ${{ steps.filter.outputs.real-pull }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -40,6 +41,9 @@ jobs:
               - 'backend/**'
               - 'docker-compose.yml'
               - 'scripts/backend-test.sh'
+            real-pull:
+              - 'ml-service/**'
+              - 'docker-compose.yml'
 
   # 2) Frontend: install -> lint -> build (build already runs tsc -b).
   frontend:
@@ -145,16 +149,92 @@ jobs:
         if: always()
         run: docker compose down -v
 
+  # 4c) Real-pull artifact test: seed a tiny fake bundle into ephemeral MinIO,
+  # let artifact-init pull + sha256sum -c it into the shared volume, boot
+  # ml-service on that volume, and assert the NON-demo envelope. This is the
+  # only job that exercises minio -> seed -> artifact-init -> ml-service load.
+  real-pull:
+    name: Real-pull (compose + non-demo inference)
+    needs: changes
+    if: ${{ needs.changes.outputs.real-pull == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write ephemeral .env (minio + artifact + postgres vars)
+        run: |
+          cat > .env <<EOF
+          POSTGRES_DB=ml_portfolio
+          POSTGRES_USER=ml_portfolio
+          POSTGRES_PASSWORD=ci_$(openssl rand -hex 8)
+          MINIO_ROOT_USER=ci_minio
+          MINIO_ROOT_PASSWORD=ci_$(openssl rand -hex 16)
+          ARTIFACT_BUCKET=ml-artifacts
+          ARTIFACT_VERSION=0.0.1-ci
+          ARTIFACT_SOURCE_DIR=./ml-service/tests/fixtures/distilbert-cfpb-mini
+          EOF
+
+      - name: Start MinIO and wait for health
+        run: |
+          docker compose up -d minio
+          for i in $(seq 1 30); do
+            if [ "$(docker inspect -f '{{.State.Health.Status}}' ml_portfolio_minio)" = "healthy" ]; then
+              echo "MinIO healthy after ~$((i * 2))s"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::minio never became healthy within 60s"; exit 1
+
+      - name: Seed the mini-bundle into the bucket
+        run: docker compose --profile seed run --rm minio-seed
+
+      - name: Boot ml-service (triggers artifact-init pull + verify, then load)
+        run: docker compose up -d ml-service
+
+      - name: Wait for /health/ready to report the model loaded
+        run: |
+          for i in $(seq 1 60); do
+            body="$(curl -fsS http://localhost:8000/health/ready 2>/dev/null || true)"
+            if [ "$(echo "$body" | jq -r '.ready')" = "true" ]; then
+              echo "ml-service ready after ~$((i * 2))s: $body"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::ml-service /health/ready never reported ready within 120s"
+          curl -fsS http://localhost:8000/health/ready || true
+          exit 1
+
+      - name: Assert non-demo inference over /predict
+        run: |
+          resp="$(curl -fsS -X POST \
+            http://localhost:8000/v1/models/distilbert-cfpb/predict \
+            -H 'Content-Type: application/json' \
+            -d '{"text":"my credit card was charged twice for the same purchase"}')"
+          echo "predict response: $resp"
+          demo="$(echo "$resp" | jq -r '.meta.demo_mode')"
+          if [ "$demo" != "false" ]; then
+            echo "::error::expected meta.demo_mode=false, got '$demo'"; exit 1
+          fi
+          echo "Non-demo inference confirmed (demo_mode=false)."
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=200
+
+      - name: Tear down (drop volumes too)
+        if: always()
+        run: docker compose down -v
+
   # 5) Single aggregation gate.
   ci-success:
     name: CI success
     if: ${{ always() }}
-    needs: [changes, frontend, backend, ml-service, integration]
+    needs: [changes, frontend, backend, ml-service, integration, real-pull]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any required job failed
         run: |
-          results="${{ needs.changes.result }} ${{ needs.frontend.result }} ${{ needs.backend.result }} ${{ needs.ml-service.result }} ${{ needs.integration.result }}"
+          results="${{ needs.changes.result }} ${{ needs.frontend.result }} ${{ needs.backend.result }} ${{ needs.ml-service.result }} ${{ needs.integration.result }} ${{ needs.real-pull.result }}"
           echo "Job results: $results"
           for r in $results; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then

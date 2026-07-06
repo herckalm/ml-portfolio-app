@@ -54,3 +54,9 @@ ml-service/artifacts/
 
 # Local-only compose overrides (machine-specific paths, e.g. real artifact mounts)
 docker-compose.override.yml
+docker-compose.override.yml.retired
+
+# CI test fixtures — force-track the tiny mini-bundle despite the global
+# *.onnx / artifact ignores above (needed by the real-pull CI job).
+!ml-service/tests/fixtures/
+!ml-service/tests/fixtures/**

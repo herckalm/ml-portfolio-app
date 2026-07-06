@@ -1,0 +1,34 @@
+{
+  "version": "1.0",
+  "truncation": null,
+  "padding": null,
+  "added_tokens": [],
+  "normalizer": null,
+  "pre_tokenizer": {
+    "type": "Whitespace"
+  },
+  "post_processor": null,
+  "decoder": null,
+  "model": {
+    "type": "WordLevel",
+    "vocab": {
+      "[UNK]": 0,
+      "tok1": 1,
+      "tok2": 2,
+      "tok3": 3,
+      "tok4": 4,
+      "tok5": 5,
+      "tok6": 6,
+      "tok7": 7,
+      "tok8": 8,
+      "tok9": 9,
+      "tok10": 10,
+      "tok11": 11,
+      "tok12": 12,
+      "tok13": 13,
+      "tok14": 14,
+      "tok15": 15
+    },
+    "unk_token": "[UNK]"
+  }
+}
