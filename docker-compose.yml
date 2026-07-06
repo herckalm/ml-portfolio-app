@@ -52,7 +52,7 @@ services:
       ARTIFACT_BUCKET: ${ARTIFACT_BUCKET}
       ARTIFACT_VERSION: ${ARTIFACT_VERSION}
     volumes:
-      - ${ARTIFACT_SOURCE_DIR}:/src:ro
+      - ${ARTIFACT_SOURCE_DIR:-/tmp}:/src:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
