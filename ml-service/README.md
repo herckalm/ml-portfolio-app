@@ -6,9 +6,10 @@ private network.
 
 > **Status: inference path live (predictor #1).** The service exposes liveness,
 > readiness, and the inference route, with the DistilBERT CFPB classifier wired
-> as predictor #1 behind the registry. Inference is artifact-gated: with no
-> bundle mounted the process still boots and serves demo mode. Predictors #2–#4
-> remain planned. This README documents the current shape alongside the target
+> as predictor #1 behind the registry. The artifact arrives via an object-store
+> pull (MinIO in Compose); inference is artifact-gated, so when the pull finds
+> nothing the process still boots and serves demo mode. Predictors #2–#4 remain
+> planned. This README documents the current shape alongside the target
 > architecture; each section marks which is which. The system-level integration
 > decision lives in [`../backend/ARCHITECTURE.md`](../backend/ARCHITECTURE.md) §9.
 
@@ -37,25 +38,18 @@ The service is a **pluggable predictor host**, not a single-model server. A
 registry maps a `model_id` to a _predictor_, and one uniform envelope wraps every
 result regardless of which model produced it:
 
+```
 POST /v1/models/{model_id}/predict
-
-│
-
-▼
-
-Registry ........ model_id → Predictor (lazy-loaded)
-
-│
-
-▼
-
-Predictor ....... load() / predict() + model_loaded ← behavioral Protocol
-
-│
-
-▼
-
-Envelope ........ { model_id, model_version, result, meta }
+        │
+        ▼
+   Registry ........ model_id → Predictor (lazy-loaded)
+        │
+        ▼
+   Predictor ....... load() / predict() + model_loaded   ← behavioral Protocol
+        │
+        ▼
+   Envelope ........ { model_id, model_version, result, meta }
+```
 
 The service sits **behind the backend** — the browser never calls it directly.
 The backend owns authentication, rate-limiting, and translating this service's
@@ -152,43 +146,27 @@ is project-local.
 
 ## Project structure
 
+```
 ml-service/
-
 ├── app/
-
-│ ├── init.py
-
-│ ├── main.py # FastAPI app + root route
-
-│ ├── registry.py # model_id → Predictor, lazy loading
-
-│ ├── schemas.py # request models + response envelope (Pydantic)
-
-│ ├── cleaning.py # vendored from ml-portfolio-models (frozen contract)
-
-│ ├── predictors/
-
-│ │ ├── init.py # the Predictor Protocol
-
-│ │ └── distilbert.py # predictor #1 (DistilBERT CFPB, ONNX)
-
-│ └── routers/
-
-│ ├── init.py
-
-│ ├── health.py # liveness + readiness
-
-│ └── predict.py # POST /v1/models/{model_id}/predict
-
-├── tests/ # cleaning unit tests + API contract tests
-
-├── Dockerfile # multi-stage uv build, non-root runtime
-
+│   ├── __init__.py
+│   ├── main.py              # FastAPI app + root route
+│   ├── registry.py          # model_id → Predictor, lazy loading
+│   ├── schemas.py           # request models + response envelope (Pydantic)
+│   ├── cleaning.py          # vendored from ml-portfolio-models (frozen contract)
+│   ├── predictors/
+│   │   ├── __init__.py      # the Predictor Protocol
+│   │   └── distilbert.py    # predictor #1 (DistilBERT CFPB, ONNX)
+│   └── routers/
+│       ├── __init__.py
+│       ├── health.py        # liveness + readiness
+│       └── predict.py       # POST /v1/models/{model_id}/predict
+├── tests/                   # cleaning unit tests + API contract tests
+├── Dockerfile               # multi-stage uv build, non-root runtime
 ├── pyproject.toml
-
 ├── uv.lock
-
 └── README.md
+```
 
 Planned modules (predictors #2–#4) land as additional files under
 `app/predictors/`, each implementing the same `Predictor` Protocol plus a one-row
@@ -235,25 +213,47 @@ curl localhost:8000/health
 # {"status":"healthy"}
 ```
 
-### Artifact mounting
+### Artifact delivery
 
 The model bundle lives in the separate `ml-portfolio-models` repo, is gitignored,
-and is ~268 MB — it **never travels through git** into this repo. It is mounted
-into the container at runtime, under a per-domain subdirectory keyed by the
-predictor:
+and is ~268 MB — it **never travels through git** into this repo. Two paths get it
+into the container; the registry reads it the same way either way, resolving each
+model to `${ARTIFACTS_DIR}/<relative_path>` (default `/app/artifacts`, predictor #1
+at `nlp/distilbert-cfpb`) so the public `model_id` stays decoupled from the
+on-disk layout.
+
+**Object-store pull (the committed path).** Under Docker Compose the stack runs a
+MinIO (S3-compatible) object store and a one-shot `mc` init container
+(`artifact-init`) that pulls the bundle into a shared `ml_artifacts` volume before
+this service boots, then verifies it with `sha256sum -c`. The bundle is versioned
+by bucket path (`nlp/distilbert-cfpb/<version>/`, `<version>` matching the
+artifact's `calibration.json` `model_version`). Seed the bucket once from the
+local export, then bring up the stack:
+
+```bash
+# 1) start the store  2) seed it once (profile-gated)  3) bring up the stack
+docker compose up -d minio
+docker compose --profile seed run --rm minio-seed
+docker compose up -d
+```
+
+`ARTIFACT_SOURCE_DIR` (in `.env`) points `minio-seed` at the local export;
+`ARTIFACT_BUCKET` and `ARTIFACT_VERSION` name the bucket and version. If the
+versioned prefix is absent, `artifact-init` writes nothing and the service falls
+back to demo mode. In a real deployment, swap MinIO for cloud object storage
+(S3/R2) by repointing the `mc` alias and credentials — the pull is unchanged.
+
+**Direct volume mount (local override / standalone container).** For a quick local
+run without the object store, mount the export straight to the expected path:
 
 ```bash
 docker run -p 8000:8000 \
-  -v /path/to/export:/artifacts/nlp/distilbert-cfpb \
-  -e ARTIFACTS_DIR=/artifacts \
+  -v /path/to/export:/app/artifacts/nlp/distilbert-cfpb \
   ml-service
 ```
 
-The registry resolves each model to `${ARTIFACTS_DIR}/<relative_path>` (for
-predictor #1, `nlp/distilbert-cfpb`), keeping the public `model_id` decoupled from
-the on-disk layout. With no artifact mounted, the service still starts and serves
-demo mode (see below). Object-store pull (versioned, checksum-verified) is the
-production target.
+With neither path providing an artifact, the service still starts and serves demo
+mode (see below).
 
 ---
 
@@ -362,8 +362,9 @@ the readiness gate and demo mode work. This is deliberate, not an inconsistency.
 
 ## What to change before deploying
 
-1. **Artifact delivery** — move from a local volume mount to a versioned,
-   checksum-verified object-store pull.
+1. **Artifact store** — the object-store pull is built against MinIO in Compose;
+   for a real deploy, repoint the `mc` alias/credentials at managed object storage
+   (S3/R2) and host the versioned, checksum-verified bundle there.
 2. **Network policy / service auth** — the service must remain unreachable from
    the public internet; only the backend should reach it (private network or a
    service token).
