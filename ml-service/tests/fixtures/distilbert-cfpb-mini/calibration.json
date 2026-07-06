@@ -1,0 +1,5 @@
+{
+  "temperature": 2.0,
+  "band_threshold": 0.75,
+  "model_version": "0.0.1-ci"
+}
