@@ -44,13 +44,14 @@ export const projectSchema = z.object({
   description: z.string(),
   domain: z.string(), // one of PROJECT_DOMAINS; not enum-constrained here (see Domain note)
   modelType: z.string(),
-  // Matches ProjectResponseDto.GitHubUrl (string?). The backend always sends the
-  // key — default JSON serialization, no null-omission configured in Program.cs —
-  // so a null arrives as `"gitHubUrl": null`, never an absent key. That makes
-  // .nullable() the load-bearing modifier. .optional() is harmless defensive slack
-  // for an absent-key case the current contract never emits; safe to drop if you
-  // want the schema to mirror the DTO exactly.
+  // Matches ProjectResponseDto.GitHubUrl (string?). The backend always sends the key — default JSON serialization, So a null arrives as `"gitHubUrl": null`, never an absent key. That makes .nullable() the load-bearing modifier.
   gitHubUrl: z.string().nullable().optional(),
+  // Matches ProjectResponseDto.ModelId (string?). Registry key of the runnable
+  // predictor backing this project (e.g. "distilbert-cfpb"), or null when the
+  // project has no live demo. Same nullable contract as gitHubUrl — the backend
+  // always sends the key, null when unset. This is the field the detail-page
+  // "Try it live" demo gates on: render the demo iff modelId is non-null.
+  modelId: z.string().nullable().optional(),
   createdAt: z.coerce.date(),
   ownerId: z.number(),
   isPublished: z.boolean(),
