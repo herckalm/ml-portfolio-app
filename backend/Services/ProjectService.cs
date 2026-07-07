@@ -121,6 +121,7 @@ public class ProjectService : IProjectService
         Domain = p.Domain,
         ModelType = p.ModelType ?? string.Empty,
         GitHubUrl = p.GitHubUrl,
+        ModelId = p.ModelId,
         CreatedAt = p.CreatedAt,
         OwnerId = p.OwnerId,
         IsPublished = p.IsPublished
