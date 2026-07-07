@@ -70,6 +70,14 @@ public class ProjectResponseDto
     public string Domain { get; set; } = string.Empty;
     public string ModelType { get; set; } = string.Empty;
     public string? GitHubUrl { get; set; }
+
+    /// <summary>
+    /// Registry key of the runnable predictor backing this project, or
+    /// <c>null</c> when the project has no live demo. Read-only for clients:
+    /// set by the owner out-of-band, never through create/update.
+    /// </summary>
+    public string? ModelId { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public int OwnerId { get; set; }
     public bool IsPublished { get; set; }

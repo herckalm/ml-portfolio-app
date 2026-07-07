@@ -44,6 +44,8 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Title).IsRequired().HasMaxLength(200);
             entity.Property(e => e.Description).HasMaxLength(2000);
             entity.Property(e => e.Domain).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Domain).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.ModelId).HasMaxLength(100);
 
             // Visibility gate; existing rows backfill to false (draft).
             entity.Property(e => e.IsPublished).HasDefaultValue(false);

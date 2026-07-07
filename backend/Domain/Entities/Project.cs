@@ -1,5 +1,4 @@
 namespace MlPortfolio.Api.Domain.Entities;
-
 /// <summary>
 /// A portfolio project owned by a single <see cref="User"/>. Projects start as
 /// owner-only drafts and become visible on the owner's public page
@@ -15,16 +14,23 @@ public class Project
     public string Domain { get; set; } = string.Empty;
     public string? GitHubUrl { get; set; }
     public string? ModelType { get; set; }
+
+    /// <summary>
+    /// Registry key of the runnable predictor backing this project (e.g.
+    /// <c>"distilbert-cfpb"</c>), or <c>null</c> when the project has no live demo.
+    /// Distinct from <see cref="ModelType"/>: that is a human-readable label
+    /// ("DistilBERT classifier"), this is the machine key the ml-service routes on.
+    /// Owner-set metadata, never client input.
+    /// </summary>
+    public string? ModelId { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-
     public int OwnerId { get; set; }
-
     /// <summary>
     /// Owning user. The <c>null!</c> initializer asserts EF Core will populate
     /// this on load (every project has an owner), suppressing the nullable warning.
     /// </summary>
     public User Owner { get; set; } = null!;
-
     /// <summary>Visibility gate: <c>false</c> = draft (owner-only), <c>true</c> = public.</summary>
     public bool IsPublished { get; set; } = false;
 }
