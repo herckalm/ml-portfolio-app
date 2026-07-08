@@ -135,16 +135,9 @@ services:
   ml-service:
     build:
       context: ./ml-service
-    environment:
-      POSTGRES_HOST: postgres # the four names your health.py reads
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - ml_artifacts:/app/artifacts
     depends_on:
-      postgres:
-        condition: service_healthy
       artifact-init:
         condition: service_completed_successfully
     ports:
