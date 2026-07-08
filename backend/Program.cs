@@ -1,4 +1,3 @@
-// -----------------------------------------------------------------------------
 // Application composition root.
 //
 // Boots the API in two phases: (1) configure the DI container and bind/validate
@@ -7,7 +6,6 @@
 // the app is built, and middleware runs in the order added. JWT options are
 // validated at startup so a misconfigured secret/issuer/audience fails the boot
 // rather than the first request.
-// -----------------------------------------------------------------------------
 
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -19,6 +17,25 @@ using MlPortfolio.Api.Infrastructure.Data;
 using MlPortfolio.Api.Middleware;
 using MlPortfolio.Api.Repositories;
 using MlPortfolio.Api.Services;
+
+// a dependency-free liveness check for the Docker HEALTHCHECK, so the runtime
+// image needs no curl. Branches BEFORE host construction — no DI, no DbContext,
+// no config validation — then exits 0 (healthy) / 1 (unhealthy). Targets
+// 127.0.0.1, not localhost, to avoid the IPv6 ::1 connection-refused hit.
+
+if (args.Contains("--health-check"))
+{
+    try
+    {
+        using var probe = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+        var res = await probe.GetAsync("http://127.0.0.1:8080/health");
+        Environment.Exit(res.IsSuccessStatusCode ? 0 : 1);
+    }
+    catch
+    {
+        Environment.Exit(1);
+    }
+}
 
 var builder = WebApplication.CreateBuilder(args);
 

@@ -42,11 +42,6 @@ RUN dotnet ef migrations bundle \
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
-# Installed as root, BEFORE we drop privileges below.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/*
-
 # Copy just the published output from the build stage
 COPY --from=build /app/publish ./
 
@@ -61,9 +56,10 @@ EXPOSE 8080
 # Run as the non-root user baked into the official image ($APP_UID).
 USER $APP_UID
 
-# Self-contained liveness check against the /health endpoint in your Program.cs.
+# Self-contained liveness check against /health, via the app's own --health-check
+# CLI mode (Program.cs). No curl needed — the .NET runtime is already present.
 HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=3 \
-    CMD curl --fail http://localhost:8080/health || exit 1
+    CMD ["dotnet", "MlPortfolio.Api.dll", "--health-check"]
 
 ENTRYPOINT ["dotnet", "MlPortfolio.Api.dll"]
 
