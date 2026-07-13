@@ -1,259 +1,195 @@
-name: CI
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ml_portfolio_db
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432" # host-published for local DB GUIs; drop in prod
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
+  # S3-compatible object store for local model-artifact delivery. Recent minio
+  # images bundle `mc` with a preconfigured `local` alias, so the healthcheck
+  # is `mc ready local` (the image dropped curl). Tag is pinned, not `latest`,
+  # per the artifact-delivery contract.
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: ml_portfolio_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "9000:9000" # S3 API — host-published for the console/mc; drop in prod
+      - "9001:9001" # web console — dev convenience; drop in prod
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-# Cancel an in-flight run when you push again to the same PR/branch.
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # One-shot seeder (manual, profile-gated). Seeds NLP and CV bundles into
+  # the bucket with SHA256SUMS manifests for each model. Only serving files
+  # are shipped — model.safetensors is deliberately NOT included.
+  # Run explicitly with: docker compose --profile seed run --rm minio-seed
+  minio-seed:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    profiles: ["seed"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      ARTIFACT_BUCKET: ${ARTIFACT_BUCKET}
+      ARTIFACT_VERSION: ${ARTIFACT_VERSION}
+    volumes:
+      - ${NLP_ARTIFACT_SOURCE_DIR:-/tmp}:/src/nlp:ro
+      - ${CV_ARTIFACT_SOURCE_DIR:-/tmp}:/src/cv:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing "local/$$ARTIFACT_BUCKET"
 
-permissions:
-  contents: read
+        # --- NLP: distilbert-cfpb ---
+        cd /src/nlp
+        sha256sum model.onnx config.json tokenizer.json calibration.json > /tmp/SHA256SUMS_NLP
+        NLP_DEST="local/$$ARTIFACT_BUCKET/nlp/distilbert-cfpb/$$ARTIFACT_VERSION/"
+        mc cp model.onnx config.json tokenizer.json calibration.json /tmp/SHA256SUMS_NLP "$$NLP_DEST"
+        echo "seeded $$NLP_DEST"
 
-jobs:
-  # 1) Figure out which service folders actually changed in this PR.
-  changes:
-    name: Detect changes
-    runs-on: ubuntu-latest
-    outputs:
-      frontend: ${{ steps.filter.outputs.frontend }}
-      backend: ${{ steps.filter.outputs.backend }}
-      ml-service: ${{ steps.filter.outputs.ml-service }}
-      integration: ${{ steps.filter.outputs.integration }}
-      real-pull: ${{ steps.filter.outputs.real-pull }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            frontend:
-              - 'frontend/**'
-            backend:
-              - 'backend/**'
-            ml-service:
-              - 'ml-service/**'
-            integration:
-              - 'backend/**'
-              - 'docker-compose.yml'
-              - 'scripts/backend-test.sh'
-            real-pull:
-              - 'ml-service/**'
-              - 'docker-compose.yml'
+        # --- CV: vit-cifar10 ---
+        cd /src/cv
+        sha256sum vit_best.onnx > /tmp/SHA256SUMS_CV
+        CV_DEST="local/$$ARTIFACT_BUCKET/cv/vit-cifar10/$$ARTIFACT_VERSION/"
+        mc cp vit_best.onnx /tmp/SHA256SUMS_CV "$$CV_DEST"
+        echo "seeded $$CV_DEST"
+    restart: "no"
 
-  # 2) Frontend: install -> lint -> build (build already runs tsc -b).
-  frontend:
-    name: Frontend (lint + build)
-    needs: changes
-    if: ${{ needs.changes.outputs.frontend == 'true' }}
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run build # tsc -b && vite build
+  # One-shot puller (runs on every `up`). Populates the shared artifact volume
+  # from the bucket, then verifies checksums. Tolerant by contract: if a
+  # versioned prefix is absent (nothing seeded), it logs and exits 0 so
+  # ml-service degrades to demo mode.
+  artifact-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      ARTIFACT_BUCKET: ${ARTIFACT_BUCKET}
+      ARTIFACT_VERSION: ${ARTIFACT_VERSION}
+    volumes:
+      - ml_artifacts:/artifacts
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
 
-  # 3) Backend: restore -> build. No test project yet (see notes below).
+        # --- NLP: distilbert-cfpb ---
+        NLP_SRC="local/$$ARTIFACT_BUCKET/nlp/distilbert-cfpb/$$ARTIFACT_VERSION/"
+        if mc stat "$${NLP_SRC}model.onnx" >/dev/null 2>&1; then
+          mkdir -p /artifacts/nlp/distilbert-cfpb
+          mc cp --recursive "$$NLP_SRC" /artifacts/nlp/distilbert-cfpb/
+          cd /artifacts/nlp/distilbert-cfpb
+          sha256sum -c SHA256SUMS_NLP
+          echo "nlp artifact pulled and verified"
+        else
+          echo "nlp artifact prefix absent ($$NLP_SRC) — leaving demo mode"
+        fi
+
+        # --- CV: vit-cifar10 ---
+        CV_SRC="local/$$ARTIFACT_BUCKET/cv/vit-cifar10/$$ARTIFACT_VERSION/"
+        if mc stat "$${CV_SRC}vit_best.onnx" >/dev/null 2>&1; then
+          mkdir -p /artifacts/cv/vit-cifar10
+          mc cp --recursive "$$CV_SRC" /artifacts/cv/vit-cifar10/
+          cd /artifacts/cv/vit-cifar10
+          sha256sum -c SHA256SUMS_CV
+          echo "cv artifact pulled and verified"
+        else
+          echo "cv artifact prefix absent ($$CV_SRC) — leaving demo mode"
+        fi
+    restart: "no"
+
+  # One-shot: waits for a healthy DB, applies migrations, exits 0.
+  migrator:
+    build:
+      context: ./backend
+      target: migrator
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Jwt__Secret: ${JWT_SECRET}
+      Jwt__Issuer: ml-portfolio-api
+      Jwt__Audience: ml-portfolio-client
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no" # must NOT loop — it's meant to run once and exit
+
   backend:
-    name: Backend (build)
-    needs: changes
-    if: ${{ needs.changes.outputs.backend == 'true' }}
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "10.0.x"
-      - name: Cache NuGet packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('backend/**/*.csproj') }}
-          restore-keys: |
-            nuget-${{ runner.os }}-
-      - run: dotnet restore
-      - run: dotnet build --no-restore -c Release
+    build:
+      context: ./backend
+      target: runtime # explicit, so it never accidentally builds 'migrator'
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Jwt__Secret: ${JWT_SECRET}
+      Jwt__Issuer: ml-portfolio-api
+      Jwt__Audience: ml-portfolio-client
+      Jwt__ExpiryHours: "24"
+      MlService__BaseUrl: "http://ml-service:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully # schema exists before API boots
+    ports:
+      - "5013:8080" # host 5013 → container 8080
+    restart: unless-stopped
 
-  # 4) ml-service: sync (asserts lockfile) -> ruff lint -> pytest.
   ml-service:
-    name: ML service (lint + test)
-    needs: changes
-    if: ${{ needs.changes.outputs.ml-service == 'true' }}
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ml-service
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-      - run: uv sync --locked
-      - run: uvx ruff check .
-      - run: uv run pytest
+    build:
+      context: ./ml-service
+    volumes:
+      - ml_artifacts:/app/artifacts
+    depends_on:
+      artifact-init:
+        condition: service_completed_successfully
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
 
-  # 4b) Backend integration: boot the real compose stack, run the smoke test.
-  integration:
-    name: Integration (compose + backend smoke)
-    needs: changes
-    if: ${{ needs.changes.outputs.integration == 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+  frontend:
+    build:
+      context: ./frontend
+    depends_on:
+      - backend # ordering only; nginx resolver makes it resilient
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    environment:
+      RESOLVER: 127.0.0.11
+      BACKEND_UPSTREAM: http://backend:8080
 
-      - name: Write ephemeral .env for the throwaway stack
-        run: |
-          cat > .env <<EOF
-          POSTGRES_DB=ml_portfolio
-          POSTGRES_USER=ml_portfolio
-          POSTGRES_PASSWORD=ci_$(openssl rand -hex 8)
-          JWT_SECRET=$(openssl rand -base64 32)
-          EOF
-
-      - name: Build + start backend and its deps (postgres → migrator → backend)
-        run: docker compose up -d --build backend
-
-      - name: Wait for backend to report healthy
-        run: |
-          for i in $(seq 1 60); do
-            if curl -fsS http://localhost:5013/health >/dev/null 2>&1; then
-              echo "Backend healthy after ~$((i * 2))s"; exit 0
-            fi
-            sleep 2
-          done
-          echo "::error::backend /health never came up within 120s"; exit 1
-
-      - name: Run backend smoke test
-        run: bash scripts/backend-test.sh http://localhost:5013
-
-      - name: Dump compose logs on failure
-        if: failure()
-        run: docker compose logs --no-color --tail=200
-
-      - name: Tear down (drop the volume too)
-        if: always()
-        run: docker compose down -v
-
-  # 4c) Real-pull artifact test: seed mini bundles for both NLP and CV into
-  # ephemeral MinIO, let artifact-init pull + sha256sum -c them into the shared
-  # volume, boot ml-service on that volume, and assert NON-demo envelopes for
-  # both models. This is the only job that exercises the full
-  # minio -> seed -> artifact-init -> ml-service load pipeline.
-  real-pull:
-    name: Real-pull (compose + non-demo inference)
-    needs: changes
-    if: ${{ needs.changes.outputs.real-pull == 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Write ephemeral .env (minio + artifact + postgres vars)
-        run: |
-          cat > .env <<EOF
-          POSTGRES_DB=ml_portfolio
-          POSTGRES_USER=ml_portfolio
-          POSTGRES_PASSWORD=ci_$(openssl rand -hex 8)
-          MINIO_ROOT_USER=ci_minio
-          MINIO_ROOT_PASSWORD=ci_$(openssl rand -hex 16)
-          ARTIFACT_BUCKET=ml-artifacts
-          ARTIFACT_VERSION=0.0.1-ci
-          NLP_ARTIFACT_SOURCE_DIR=./ml-service/tests/fixtures/distilbert-cfpb-mini
-          CV_ARTIFACT_SOURCE_DIR=./ml-service/tests/fixtures/vit-cifar10-mini
-          EOF
-
-      - name: Start MinIO and wait for health
-        run: |
-          docker compose up -d minio
-          for i in $(seq 1 30); do
-            if [ "$(docker inspect -f '{{.State.Health.Status}}' ml_portfolio_minio)" = "healthy" ]; then
-              echo "MinIO healthy after ~$((i * 2))s"; exit 0
-            fi
-            sleep 2
-          done
-          echo "::error::minio never became healthy within 60s"; exit 1
-
-      - name: Seed the mini-bundles into the bucket (NLP + CV)
-        run: docker compose --profile seed run --rm minio-seed
-
-      - name: Boot ml-service (triggers artifact-init pull + verify, then load)
-        run: docker compose up -d ml-service
-
-      - name: Wait for /health/ready to report both models loaded
-        run: |
-          for i in $(seq 1 60); do
-            body="$(curl -fsS http://localhost:8000/health/ready 2>/dev/null || true)"
-            if [ "$(echo "$body" | jq -r '.ready')" = "true" ]; then
-              echo "ml-service ready after ~$((i * 2))s: $body"; exit 0
-            fi
-            sleep 2
-          done
-          echo "::error::ml-service /health/ready never reported ready within 120s"
-          curl -fsS http://localhost:8000/health/ready || true
-          exit 1
-
-      - name: Assert non-demo inference over /predict (NLP)
-        run: |
-          resp="$(curl -fsS -X POST \
-            http://localhost:8000/v1/models/distilbert-cfpb/predict \
-            -H 'Content-Type: application/json' \
-            -d '{"text":"my credit card was charged twice for the same purchase"}')"
-          echo "predict response: $resp"
-          demo="$(echo "$resp" | jq -r '.meta.demo_mode')"
-          if [ "$demo" != "false" ]; then
-            echo "::error::expected meta.demo_mode=false, got '$demo'"; exit 1
-          fi
-          echo "Non-demo NLP inference confirmed (demo_mode=false)."
-
-      - name: Assert non-demo inference over /predict-image (CV)
-        run: |
-          resp="$(curl -fsS -X POST \
-            http://localhost:8000/v1/models/vit-cifar10/predict-image \
-            -F 'file=@ml-service/tests/fixtures/vit-cifar10-mini/test.jpg;type=image/jpeg')"
-          echo "predict-image response: $resp"
-          demo="$(echo "$resp" | jq -r '.meta.demo_mode')"
-          if [ "$demo" != "false" ]; then
-            echo "::error::expected meta.demo_mode=false, got '$demo'"; exit 1
-          fi
-          echo "Non-demo CV inference confirmed (demo_mode=false)."
-
-      - name: Dump compose logs on failure
-        if: failure()
-        run: docker compose logs --no-color --tail=200
-
-      - name: Tear down (drop volumes too)
-        if: always()
-        run: docker compose down -v
-
-  # 5) Single aggregation gate.
-  ci-success:
-    name: CI success
-    if: ${{ always() }}
-    needs: [changes, frontend, backend, ml-service, integration, real-pull]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Fail if any required job failed
-        run: |
-          results="${{ needs.changes.result }} ${{ needs.frontend.result }} ${{ needs.backend.result }} ${{ needs.ml-service.result }} ${{ needs.integration.result }} ${{ needs.real-pull.result }}"
-          echo "Job results: $results"
-          for r in $results; do
-            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
-              echo "A required job failed."
-              exit 1
-            fi
-          done
-          echo "All jobs passed or were correctly skipped."
+volumes:
+  postgres_data:
+  minio_data:
+  ml_artifacts:
