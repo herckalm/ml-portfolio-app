@@ -201,6 +201,24 @@ export const predictApi = {
     );
     return predictEnvelopeSchema.parse(data);
   },
+
+  /**
+   * POST /api/predict/{modelId}/image — public, no auth.
+   * Sends the file as multipart/form-data under the key "file".
+   * axios sets the Content-Type boundary automatically when given FormData.
+   */
+  predictImage: async (
+    modelId: string,
+    file: File,
+  ): Promise<PredictEnvelope> => {
+    const form = new FormData();
+    form.append("file", file);
+    const { data } = await api.post(
+      `/api/predict/${encodeURIComponent(modelId)}/image`,
+      form,
+    );
+    return predictEnvelopeSchema.parse(data);
+  },
 };
 
 /**
