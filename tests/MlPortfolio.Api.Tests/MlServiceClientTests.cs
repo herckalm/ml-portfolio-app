@@ -172,4 +172,81 @@ public class MlServiceClientTests
             return _response;
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Image path tests
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private const string ImageSuccessEnvelope = """
+{
+  "model_id": "vit-cifar10",
+  "model_version": "1.0.0",
+  "result": { "label": "cat", "score": 0.95 },
+  "meta": { "demo_mode": false, "input_chars": 0 }
+}
+""";
+
+    [Fact]
+    public async Task PredictImageAsync_DeserializesEnvelope_AndForwardsResultOpaquely()
+    {
+        var handler = new StubHandler(Ok(ImageSuccessEnvelope));
+        var client = ClientFor(handler);
+
+        var envelope = await client.PredictImageAsync(
+            "vit-cifar10", new byte[] { 0xFF, 0xD8 }, "image/jpeg");
+
+        Assert.Equal("vit-cifar10", envelope.ModelId);
+        Assert.Equal("1.0.0", envelope.ModelVersion);
+        Assert.False(envelope.Meta.DemoMode);
+        // result stays opaque — reach in to verify it round-tripped.
+        Assert.Equal("cat", envelope.Result.GetProperty("label").GetString());
+        Assert.Equal(0.95, envelope.Result.GetProperty("score").GetDouble(), precision: 2);
+    }
+
+    [Fact]
+    public async Task PredictImageAsync_PostsMultipartToModelPredictImagePath()
+    {
+        var handler = new StubHandler(Ok(ImageSuccessEnvelope));
+        var client = ClientFor(handler);
+        var fakeBytes = new byte[] { 0x89, 0x50, 0x4E, 0x47 }; // PNG magic
+
+        await client.PredictImageAsync("vit-cifar10", fakeBytes, "image/png");
+
+        Assert.Equal(HttpMethod.Post, handler.CapturedRequest!.Method);
+        Assert.Equal(
+            "http://ml-service.test/v1/models/vit-cifar10/predict-image",
+            handler.CapturedRequest.RequestUri!.ToString());
+
+        // The request must be multipart/form-data, not JSON.
+        Assert.StartsWith(
+            "multipart/form-data",
+            handler.CapturedRequest.Content!.Headers.ContentType!.MediaType);
+    }
+
+    [Fact]
+    public async Task PredictImageAsync_On503_ThrowsUnavailable()
+    {
+        const string detail = "Model 'vit-cifar10' is not loaded (artifact unavailable).";
+        var handler = new StubHandler(Error(HttpStatusCode.ServiceUnavailable, $$"""{"detail": "{{detail}}"}"""));
+        var client = ClientFor(handler);
+
+        var ex = await Assert.ThrowsAsync<MlServiceUnavailableException>(
+            () => client.PredictImageAsync("vit-cifar10", new byte[] { 0xFF, 0xD8 }, "image/jpeg"));
+
+        Assert.Equal(detail, ex.Message);
+    }
+
+    [Fact]
+    public async Task PredictImageAsync_On415_ThrowsBaseException()
+    {
+        // 415 is not a mapped status in the contract — falls through to base type → global 500.
+        var handler = new StubHandler(Error(HttpStatusCode.UnsupportedMediaType, """{"detail": "Unsupported image type."}"""));
+        var client = ClientFor(handler);
+
+        var ex = await Assert.ThrowsAsync<MlServiceException>(
+            () => client.PredictImageAsync("vit-cifar10", new byte[] { 0x00 }, "image/tiff"));
+
+        Assert.Equal(typeof(MlServiceException), ex.GetType());
+        Assert.Contains("415", ex.Message);
+    }
 }
