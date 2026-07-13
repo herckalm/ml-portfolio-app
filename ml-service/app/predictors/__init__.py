@@ -43,8 +43,7 @@ class Predictor(Protocol):
         ...
 
     def load(self) -> None:
-        """Lazily load the artifact. Idempotent and non-fatal.
-
+        """
         A missing or unreadable artifact must NOT raise: set internal state so
         `model_loaded` reports False and let the process stay up. Raising is
         reserved for genuinely unexpected errors, not the expected
@@ -52,9 +51,10 @@ class Predictor(Protocol):
         """
         ...
 
-    def predict(self, text: str) -> PredictionResult:
-        """Run inference on cleaned-or-raw input text.
+    def predict(self, payload: str | bytes) -> PredictionResult:
+        """Run inference on the input payload.
 
+        `str` for text-based models (NLP), `bytes` for binary models (CV).
         Precondition: `model_loaded` is True (the router checks this before
         dispatch), so implementations need not re-check readiness here.
         Returns a per-model payload that fits the envelope's `result` field.
