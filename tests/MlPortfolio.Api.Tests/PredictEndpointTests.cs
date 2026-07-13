@@ -133,8 +133,14 @@ public class PredictEndpointTests
     {
         private readonly Exception _toThrow;
         public ThrowingStub(Exception toThrow) => _toThrow = toThrow;
+
         public Task<MlPredictResponse> PredictAsync(
             string modelId, string text, CancellationToken cancellationToken = default) =>
+            throw _toThrow;
+
+        public Task<MlPredictResponse> PredictImageAsync(
+            string modelId, byte[] fileBytes, string contentType,
+            CancellationToken cancellationToken = default) =>
             throw _toThrow;
     }
 
@@ -143,8 +149,96 @@ public class PredictEndpointTests
     {
         private readonly MlPredictResponse _envelope;
         public ReturningStub(MlPredictResponse envelope) => _envelope = envelope;
+
         public Task<MlPredictResponse> PredictAsync(
             string modelId, string text, CancellationToken cancellationToken = default) =>
             Task.FromResult(_envelope);
+
+        public Task<MlPredictResponse> PredictImageAsync(
+            string modelId, byte[] fileBytes, string contentType,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(_envelope);
+    }
+    // image endpoint tests
+
+    private const string HappyImageResultJson =
+        """{ "label": "cat", "score": 0.95 }""";
+
+    [Fact]
+    public async Task PredictImage_On503_ReturnsDemoEnvelope_200()
+    {
+        var client = ClientWithStub(new ThrowingStub(
+            new MlServiceUnavailableException("Model 'vit-cifar10' is not loaded (artifact unavailable).")));
+
+        using var content = BuildImageMultipart(new byte[] { 0xFF, 0xD8, 0xFF }, "image/jpeg");
+        var response = await client.PostAsync("/api/predict/vit-cifar10/image", content);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = doc.RootElement;
+
+        Assert.True(GetBool(root, "meta", "demo_mode"));
+        Assert.Equal("vit-cifar10", GetString(root, "model_id"));
+        Assert.Equal("demo", GetString(root, "model_version"));
+        // CV canned result: only label + score, no calibrated/confidence_band.
+        Assert.Equal("cat", root.GetProperty("result").GetProperty("label").GetString());
+        Assert.Equal(0.95, root.GetProperty("result").GetProperty("score").GetDouble(), precision: 2);
+    }
+
+    [Fact]
+    public async Task PredictImage_OnSuccess_PassesEnvelopeThrough_200()
+    {
+        using var resultDoc = JsonDocument.Parse(HappyImageResultJson);
+        var envelope = new MlPredictResponse
+        {
+            ModelId = "vit-cifar10",
+            ModelVersion = "1.0.0",
+            Result = resultDoc.RootElement.Clone(),
+            Meta = new PredictMeta { DemoMode = false, InputChars = 0 }
+        };
+        var client = ClientWithStub(new ReturningStub(envelope));
+
+        using var content = BuildImageMultipart(new byte[] { 0x89, 0x50, 0x4E, 0x47 }, "image/png");
+        var response = await client.PostAsync("/api/predict/vit-cifar10/image", content);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = doc.RootElement;
+        Assert.False(GetBool(root, "meta", "demo_mode"));
+        Assert.Equal("1.0.0", GetString(root, "model_version"));
+        Assert.Equal("cat", root.GetProperty("result").GetProperty("label").GetString());
+    }
+
+    [Fact]
+    public async Task PredictImage_OnModelNotFound_Returns404ProblemDetails()
+    {
+        const string detail = "Unknown model_id 'bogus'.";
+        var client = ClientWithStub(new ThrowingStub(new MlServiceModelNotFoundException(detail)));
+
+        using var content = BuildImageMultipart(new byte[] { 0xFF, 0xD8 }, "image/jpeg");
+        var response = await client.PostAsync("/api/predict/bogus/image", content);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(detail, doc.RootElement.GetProperty("detail").GetString());
+    }
+
+    /// <summary>
+    /// Builds a minimal multipart/form-data body whose "file" part mirrors what a
+    /// browser sends when the user picks an image — the real IFormFile is populated
+    /// by ASP.NET Core from this during integration tests.
+    /// </summary>
+    private static MultipartFormDataContent BuildImageMultipart(byte[] bytes, string contentType)
+    {
+        var multipart = new MultipartFormDataContent();
+        var fileContent = new ByteArrayContent(bytes);
+        fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+        // Field name must match the action parameter name "file".
+        multipart.Add(fileContent, "file", "test-image.jpg");
+        return multipart;
     }
 }

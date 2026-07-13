@@ -7,16 +7,14 @@ using MlPortfolio.Api.Services;
 namespace MlPortfolio.Api.Controllers;
 
 /// <summary>
-/// Inference proxy under <c>api/predict</c>. Public (no auth) — this is the demo
-/// surface a portfolio visitor hits. Thin by design: validates the input contract
-/// the backend owns, forwards to the ml-service via <see cref="IMlServiceClient"/>,
-/// and returns the envelope unchanged on success.
+/// Inference proxy under <c>api/predict</c>. Public (no auth) — demo surface.
+/// Thin by design: validates the input contract the backend owns, forwards to the
+/// ml-service via <see cref="IMlServiceClient"/>, and returns the envelope unchanged
+/// on success.
 ///
-/// Error shaping is split by concern: ml-service 404/422 bubble to
-/// <see cref="Middleware.GlobalExceptionHandler"/> as RFC 7807 ProblemDetails,
-/// while 503 (model not loaded) is caught here and converted to a demo-mode 200 —
-/// the one place product policy ("unavailable means serve a canned example") lives,
-/// deliberately kept out of the transport client.
+/// Error shaping: ml-service 404/422 bubble to GlobalExceptionHandler as RFC 7807
+/// ProblemDetails. 503 is caught here and converted to a demo-mode 200 — product
+/// policy kept deliberately out of the transport client, for both endpoints.
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
@@ -24,8 +22,8 @@ public class PredictController : ControllerBase
 {
     private readonly IMlServiceClient _mlService;
 
-    // Same snake_case policy the client uses, so a demo envelope serializes
-    // identically to a real one (demo_mode, model_id, …).
+    // snake_case policy shared by both demo envelopes so they serialize
+    // identically to real upstream responses.
     private static readonly JsonSerializerOptions DemoJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
@@ -36,12 +34,10 @@ public class PredictController : ControllerBase
         _mlService = mlService;
     }
 
+    // Text prediction
+
     /// <summary>
-    /// POST <c>/api/predict/{modelId}</c> — runs inference for the named model.
-    /// Returns the ml-service envelope (<c>model_id, model_version, result, meta</c>)
-    /// as-is on success, or a demo-mode envelope of the same shape when the upstream
-    /// model isn't loaded (503). Unknown-model (404) and validation (422) surface as
-    /// ProblemDetails via the global handler.
+    /// POST <c>/api/predict/{modelId}</c> — runs text inference for the named model.
     /// </summary>
     [HttpPost("{modelId}")]
     public async Task<ActionResult<MlPredictResponse>> Predict(
@@ -54,23 +50,58 @@ public class PredictController : ControllerBase
         }
         catch (MlServiceUnavailableException)
         {
-            // Model registered but not loaded upstream. Degrade gracefully: return a
-            // valid envelope the frontend renders with a demo badge, rather than an
-            // error. 404/422 are intentionally NOT caught — they belong to the global
-            // ProblemDetails handler.
-            return Ok(BuildDemoEnvelope(modelId, request.Text));
+            return Ok(BuildTextDemoEnvelope(modelId, request.Text));
         }
     }
 
+    // Image prediction
+
     /// <summary>
-    /// Synthesizes a demo-mode envelope matching the real DistilBERT contract: 
-    /// a canned high-confidence classification so the frontend exercises its full
-    /// render path (humanized label + demo badge). <c>model_version</c> is the
-    /// <c>"demo"</c> sentinel so telemetry can distinguish canned from real output.
+    /// POST <c>/api/predict/{modelId}/image</c> — runs image inference for the
+    /// named model. Accepts <c>multipart/form-data</c> with a single file field.
+    /// Returns the ml-service envelope on success, or a CV demo-mode envelope of
+    /// the same shape on 503 (model not loaded). 404/422/415 surface as
+    /// ProblemDetails via the global handler.
     /// </summary>
-    private static MlPredictResponse BuildDemoEnvelope(string modelId, string text)
+    [HttpPost("{modelId}/image")]
+    public async Task<ActionResult<MlPredictResponse>> PredictImage(
+        string modelId, IFormFile file, CancellationToken cancellationToken)
     {
-        // Canned result mirrors the documented distilbert-cfpb shape exactly.
+        // Read the raw bytes once; IFormFile's stream is not seekable after the
+        // first read and the multipart body is already buffered by the framework.
+        byte[] fileBytes;
+        using (var ms = new MemoryStream())
+        {
+            await file.CopyToAsync(ms, cancellationToken);
+            fileBytes = ms.ToArray();
+        }
+
+        // Forward the browser's content-type verbatim. The ml-service validates
+        // whether it's in its own allowlist and returns 415 for anything outside it —
+        // that falls through ClassifyError to a base MlServiceException → global 500.
+        var contentType = file.ContentType;
+
+        try
+        {
+            var envelope = await _mlService.PredictImageAsync(
+                modelId, fileBytes, contentType, cancellationToken);
+            return Ok(envelope);
+        }
+        catch (MlServiceUnavailableException)
+        {
+            // Same demo-mode degradation as the text path, but with the CV canned
+            // result shape: {label, score} only — no calibrated, no confidence_band.
+            return Ok(BuildImageDemoEnvelope(modelId));
+        }
+    }
+
+    // Demo envelope builders
+
+    /// <summary>
+    /// Text demo — mirrors the documented distilbert-cfpb result shape exactly.
+    /// </summary>
+    private static MlPredictResponse BuildTextDemoEnvelope(string modelId, string text)
+    {
         var cannedResult = new
         {
             label = "Credit card",
@@ -79,8 +110,6 @@ public class PredictController : ControllerBase
             confidence_band = "high"
         };
 
-        // Serialize → reparse into a JsonElement so it drops into the opaque
-        // Result slot identically to a real upstream result.
         var resultElement = JsonSerializer.SerializeToElement(cannedResult, DemoJsonOptions);
 
         return new MlPredictResponse
@@ -92,6 +121,34 @@ public class PredictController : ControllerBase
             {
                 DemoMode = true,
                 InputChars = text.Length
+            }
+        };
+    }
+
+    /// <summary>
+    /// CV demo — mirrors the documented vit-cifar10 result shape: {label, score} only.
+    /// <c>model_version</c> is the <c>"demo"</c> sentinel so telemetry can distinguish
+    /// canned from real output. <c>input_chars</c> is 0 — not meaningful for images.
+    /// </summary>
+    private static MlPredictResponse BuildImageDemoEnvelope(string modelId)
+    {
+        var cannedResult = new
+        {
+            label = "cat",
+            score = 0.95
+        };
+
+        var resultElement = JsonSerializer.SerializeToElement(cannedResult, DemoJsonOptions);
+
+        return new MlPredictResponse
+        {
+            ModelId = modelId,
+            ModelVersion = "demo",
+            Result = resultElement,
+            Meta = new PredictMeta
+            {
+                DemoMode = true,
+                InputChars = 0   // not meaningful for binary image payloads
             }
         };
     }
