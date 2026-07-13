@@ -5,6 +5,9 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    # Allow image uploads up to 10 MB through the proxy.
+    client_max_body_size 10m;
+
     # SPA fallback: any path that isn't a real file falls back to index.html
     location / {
         try_files $uri $uri/ /index.html;

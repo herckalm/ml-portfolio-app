@@ -212,10 +212,11 @@ export const predictApi = {
     file: File,
   ): Promise<PredictEnvelope> => {
     const form = new FormData();
-    form.append("file", file);
+    form.append("file", file, file.name);
     const { data } = await api.post(
       `/api/predict/${encodeURIComponent(modelId)}/image`,
       form,
+      { headers: { "Content-Type": undefined } },
     );
     return predictEnvelopeSchema.parse(data);
   },
