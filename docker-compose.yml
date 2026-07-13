@@ -76,9 +76,14 @@ services:
 
         # --- CV: vit-cifar10 ---
         cd /src/cv
-        sha256sum vit_best.onnx > /tmp/SHA256SUMS
         CV_DEST="local/$$ARTIFACT_BUCKET/cv/vit-cifar10/$$ARTIFACT_VERSION/"
-        mc cp vit_best.onnx /tmp/SHA256SUMS "$$CV_DEST"
+        if [ -f vit_best.onnx.data ]; then
+          sha256sum vit_best.onnx vit_best.onnx.data > /tmp/SHA256SUMS
+          mc cp vit_best.onnx vit_best.onnx.data /tmp/SHA256SUMS "$$CV_DEST"
+        else
+          sha256sum vit_best.onnx > /tmp/SHA256SUMS
+          mc cp vit_best.onnx /tmp/SHA256SUMS "$$CV_DEST"
+        fi
         echo "seeded $$CV_DEST"
     restart: "no"
 
