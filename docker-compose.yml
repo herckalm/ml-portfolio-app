@@ -69,16 +69,16 @@ services:
 
         # --- NLP: distilbert-cfpb ---
         cd /src/nlp
-        sha256sum model.onnx config.json tokenizer.json calibration.json > /tmp/SHA256SUMS_NLP
+        sha256sum model.onnx config.json tokenizer.json calibration.json > /tmp/SHA256SUMS
         NLP_DEST="local/$$ARTIFACT_BUCKET/nlp/distilbert-cfpb/$$ARTIFACT_VERSION/"
-        mc cp model.onnx config.json tokenizer.json calibration.json /tmp/SHA256SUMS_NLP "$$NLP_DEST"
+        mc cp model.onnx config.json tokenizer.json calibration.json /tmp/SHA256SUMS "$$NLP_DEST"
         echo "seeded $$NLP_DEST"
 
         # --- CV: vit-cifar10 ---
         cd /src/cv
-        sha256sum vit_best.onnx > /tmp/SHA256SUMS_CV
+        sha256sum vit_best.onnx > /tmp/SHA256SUMS
         CV_DEST="local/$$ARTIFACT_BUCKET/cv/vit-cifar10/$$ARTIFACT_VERSION/"
-        mc cp vit_best.onnx /tmp/SHA256SUMS_CV "$$CV_DEST"
+        mc cp vit_best.onnx /tmp/SHA256SUMS "$$CV_DEST"
         echo "seeded $$CV_DEST"
     restart: "no"
 
@@ -110,7 +110,7 @@ services:
           mkdir -p /artifacts/nlp/distilbert-cfpb
           mc cp --recursive "$$NLP_SRC" /artifacts/nlp/distilbert-cfpb/
           cd /artifacts/nlp/distilbert-cfpb
-          sha256sum -c SHA256SUMS_NLP
+          sha256sum -c SHA256SUMS
           echo "nlp artifact pulled and verified"
         else
           echo "nlp artifact prefix absent ($$NLP_SRC) — leaving demo mode"
@@ -122,7 +122,7 @@ services:
           mkdir -p /artifacts/cv/vit-cifar10
           mc cp --recursive "$$CV_SRC" /artifacts/cv/vit-cifar10/
           cd /artifacts/cv/vit-cifar10
-          sha256sum -c SHA256SUMS_CV
+          sha256sum -c SHA256SUMS
           echo "cv artifact pulled and verified"
         else
           echo "cv artifact prefix absent ($$CV_SRC) — leaving demo mode"

@@ -1,10 +1,10 @@
 /**
  * Top navigation bar. Renders a different action set depending on auth state,
  * driven by {@link useAuth}: brand + Dashboard/Settings/Log-out when signed in,
- * Log-in/Sign-up when not.
+ * Log-in/Sign-up when not. The "Live demo" link is public and always visible.
  */
 import { Link, useNavigate } from "react-router-dom";
-import { Boxes, LogOut, Settings } from "lucide-react";
+import { Boxes, LogOut, Settings, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/auth/AuthContext";
 
@@ -31,6 +31,14 @@ export function Navbar() {
         </Link>
 
         <div className="flex items-center gap-1">
+          {/* Public — always visible */}
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/predict" className="flex items-center gap-1.5">
+              <Sparkles className="h-4 w-4 text-primary" />
+              Live demo
+            </Link>
+          </Button>
+
           {isAuthed ? (
             <>
               <Button asChild variant="ghost" size="sm">
