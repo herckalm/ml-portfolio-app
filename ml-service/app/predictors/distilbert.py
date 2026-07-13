@@ -97,8 +97,6 @@ class DistilBertPredictor:
             return
 
         try:
-            # Heavy deps imported lazily so a missing artifact never blocks
-            # process startup, and import cost is paid only on first load.
             import onnxruntime as ort
             from tokenizers import Tokenizer
 
@@ -131,27 +129,23 @@ class DistilBertPredictor:
                 len(self._id2label),
             )
         except Exception:
-            # Unexpected failure during load: stay up, log with traceback.
             logger.exception(
                 "Failed to load %s — serving without this model.", self._model_id
             )
             self._reset()
 
-    def predict(self, text: str) -> ClassificationResult:
+    def predict(self, payload: str | bytes) -> ClassificationResult:
         """Classify one complaint narrative.
 
         Precondition: model_loaded is True (the router guards this). Cleaning
         and the MIN_CHARS floor are enforced by the router before dispatch, so
-        `text` arrives already validated; we clean again defensively
+        `payload` arrives already validated; we clean again defensively
         (clean_text is idempotent).
         """
-
-        # Precondition (router-enforced): the model is loaded. Assert it so the
-        # type-checker narrows _tokenizer/_session from Optional, and so a
-        # contract violation fails loudly rather than as an AttributeError.
         assert self._tokenizer is not None and self._session is not None
+        assert isinstance(payload, str)
 
-        cleaned = clean_text(text)
+        cleaned = clean_text(payload)
 
         enc = self._tokenizer.encode(cleaned)
 
@@ -165,8 +159,6 @@ class DistilBertPredictor:
             elif name == "attention_mask":
                 feeds[name] = attention_mask
 
-        # ORT's run() return type is a broad union; this graph yields a single
-        # dense float array of logits. Cast so the checker accepts indexing.
         outputs = self._session.run(None, feeds)
         logits = np.asarray(outputs[0])[0]  # shape (num_labels,)
         probs = self._softmax(logits / self._temperature)
@@ -205,7 +197,6 @@ class DistilBertPredictor:
             cal = json.load(fh)
         self._temperature = float(cal.get("temperature", 1.0))
         self._calibrated = self._temperature != 1.0
-        # Artifact owns the threshold when present; else service default.
         self._band_threshold = float(cal.get("band_threshold", _DEFAULT_BAND_THRESHOLD))
 
     def _read_version(self) -> str:

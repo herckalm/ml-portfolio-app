@@ -69,8 +69,25 @@ class ClassificationResult(BaseModel):
     )
 
 
+class ImageClassificationResult(BaseModel):
+    """ViT-Tiny (predictor #2) result payload.
+
+    `score` is the raw softmax probability for `label`. No temperature
+    calibration was applied to the CV model; confidence_band is omitted
+    intentionally — the score is already well-distributed for CIFAR-10.
+    """
+
+    label: str = Field(..., description="Predicted CIFAR-10 class label.")
+    score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Softmax probability for `label`.",
+    )
+
+
 # union of all per-model result shapes. Extend as predictors are added.
-PredictionResult = Union[ClassificationResult]
+PredictionResult = Union[ClassificationResult, ImageClassificationResult]
 
 
 # uniform response envelope

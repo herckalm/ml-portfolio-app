@@ -22,6 +22,7 @@ from typing import Callable
 
 from app.predictors import Predictor
 from app.predictors.distilbert import DistilBertPredictor
+from app.predictors.vit import ViTPredictor
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,11 @@ _REGISTRATIONS: dict[str, ModelRegistration] = {
         model_id="distilbert-cfpb",
         relative_path="nlp/distilbert-cfpb",
         factory=DistilBertPredictor,
+    ),
+    "vit-cifar10": ModelRegistration(
+        model_id="vit-cifar10",
+        relative_path="cv/vit-cifar10",
+        factory=ViTPredictor,
     ),
 }
 

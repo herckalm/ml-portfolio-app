@@ -19,7 +19,10 @@ services:
       timeout: 5s
       retries: 5
 
-  # S3-compatible object store for local model-artifact delivery. Recent minio images bundle `mc` with a preconfigured `local` alias, so the healthcheck is `mc ready local` (the image dropped curl). Tag is pinned, not `latest`, per the artifact-delivery contract.
+  # S3-compatible object store for local model-artifact delivery. Recent minio
+  # images bundle `mc` with a preconfigured `local` alias, so the healthcheck
+  # is `mc ready local` (the image dropped curl). Tag is pinned, not `latest`,
+  # per the artifact-delivery contract.
   minio:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: ml_portfolio_minio
@@ -39,7 +42,10 @@ services:
       timeout: 5s
       retries: 5
 
-  # One-shot seeder (manual, profile-gated). Mirrors the local DistilBERT export into the bucket ONCE and uploads a SHA256SUMS manifest computed over the four serving files. Only the files serving needs — model.safetensors is unused and unreadable by appuser, so it's deliberately NOT shipped. Run explicitly with: docker compose --profile seed run --rm minio-seed
+  # One-shot seeder (manual, profile-gated). Seeds NLP and CV bundles into
+  # the bucket with SHA256SUMS manifests for each model. Only serving files
+  # are shipped — model.safetensors is deliberately NOT included.
+  # Run explicitly with: docker compose --profile seed run --rm minio-seed
   minio-seed:
     image: minio/mc:RELEASE.2025-04-16T18-13-26Z
     profiles: ["seed"]
@@ -52,21 +58,34 @@ services:
       ARTIFACT_BUCKET: ${ARTIFACT_BUCKET}
       ARTIFACT_VERSION: ${ARTIFACT_VERSION}
     volumes:
-      - ${ARTIFACT_SOURCE_DIR:-/tmp}:/src:ro
+      - ${NLP_ARTIFACT_SOURCE_DIR:-/tmp}:/src/nlp:ro
+      - ${CV_ARTIFACT_SOURCE_DIR:-/tmp}:/src/cv:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         set -e
         mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
         mc mb --ignore-existing "local/$$ARTIFACT_BUCKET"
-        cd /src
-        sha256sum model.onnx config.json tokenizer.json calibration.json > /tmp/SHA256SUMS
-        DEST="local/$$ARTIFACT_BUCKET/nlp/distilbert-cfpb/$$ARTIFACT_VERSION/"
-        mc cp model.onnx config.json tokenizer.json calibration.json /tmp/SHA256SUMS "$$DEST"
-        echo "seeded $$DEST"
+
+        # --- NLP: distilbert-cfpb ---
+        cd /src/nlp
+        sha256sum model.onnx config.json tokenizer.json calibration.json > /tmp/SHA256SUMS_NLP
+        NLP_DEST="local/$$ARTIFACT_BUCKET/nlp/distilbert-cfpb/$$ARTIFACT_VERSION/"
+        mc cp model.onnx config.json tokenizer.json calibration.json /tmp/SHA256SUMS_NLP "$$NLP_DEST"
+        echo "seeded $$NLP_DEST"
+
+        # --- CV: vit-cifar10 ---
+        cd /src/cv
+        sha256sum vit_best.onnx > /tmp/SHA256SUMS_CV
+        CV_DEST="local/$$ARTIFACT_BUCKET/cv/vit-cifar10/$$ARTIFACT_VERSION/"
+        mc cp vit_best.onnx /tmp/SHA256SUMS_CV "$$CV_DEST"
+        echo "seeded $$CV_DEST"
     restart: "no"
 
-  # One-shot puller (runs on every `up`). Populates the shared artifact volume from the bucket, then verifies checksums. Tolerant by contract: if the versioned prefix is absent (nothing seeded), it logs and exits 0 so ml-service degrades to demo mode — "pull fails or is disabled -> demo 200".
+  # One-shot puller (runs on every `up`). Populates the shared artifact volume
+  # from the bucket, then verifies checksums. Tolerant by contract: if a
+  # versioned prefix is absent (nothing seeded), it logs and exits 0 so
+  # ml-service degrades to demo mode.
   artifact-init:
     image: minio/mc:RELEASE.2025-04-16T18-13-26Z
     depends_on:
@@ -84,15 +103,29 @@ services:
       - |
         set -e
         mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
-        SRC="local/$$ARTIFACT_BUCKET/nlp/distilbert-cfpb/$$ARTIFACT_VERSION/"
-        if mc stat "$${SRC}model.onnx" >/dev/null 2>&1; then
+
+        # --- NLP: distilbert-cfpb ---
+        NLP_SRC="local/$$ARTIFACT_BUCKET/nlp/distilbert-cfpb/$$ARTIFACT_VERSION/"
+        if mc stat "$${NLP_SRC}model.onnx" >/dev/null 2>&1; then
           mkdir -p /artifacts/nlp/distilbert-cfpb
-          mc cp --recursive "$$SRC" /artifacts/nlp/distilbert-cfpb/
+          mc cp --recursive "$$NLP_SRC" /artifacts/nlp/distilbert-cfpb/
           cd /artifacts/nlp/distilbert-cfpb
-          sha256sum -c SHA256SUMS
-          echo "artifact pulled and verified"
+          sha256sum -c SHA256SUMS_NLP
+          echo "nlp artifact pulled and verified"
         else
-          echo "artifact prefix absent ($$SRC) — leaving demo mode"
+          echo "nlp artifact prefix absent ($$NLP_SRC) — leaving demo mode"
+        fi
+
+        # --- CV: vit-cifar10 ---
+        CV_SRC="local/$$ARTIFACT_BUCKET/cv/vit-cifar10/$$ARTIFACT_VERSION/"
+        if mc stat "$${CV_SRC}vit_best.onnx" >/dev/null 2>&1; then
+          mkdir -p /artifacts/cv/vit-cifar10
+          mc cp --recursive "$$CV_SRC" /artifacts/cv/vit-cifar10/
+          cd /artifacts/cv/vit-cifar10
+          sha256sum -c SHA256SUMS_CV
+          echo "cv artifact pulled and verified"
+        else
+          echo "cv artifact prefix absent ($$CV_SRC) — leaving demo mode"
         fi
     restart: "no"
 
