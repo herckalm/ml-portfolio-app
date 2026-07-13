@@ -171,7 +171,8 @@ jobs:
           MINIO_ROOT_PASSWORD=ci_$(openssl rand -hex 16)
           ARTIFACT_BUCKET=ml-artifacts
           ARTIFACT_VERSION=0.0.1-ci
-          ARTIFACT_SOURCE_DIR=./ml-service/tests/fixtures/distilbert-cfpb-mini
+          NLP_ARTIFACT_SOURCE_DIR=./ml-service/tests/fixtures/distilbert-cfpb-mini
+          CV_ARTIFACT_SOURCE_DIR=./ml-service/tests/fixtures/vit-cifar10-mini
           EOF
 
       - name: Start MinIO and wait for health
