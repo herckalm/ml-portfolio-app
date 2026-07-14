@@ -26,22 +26,26 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # runtime: just Python + the built venv + source
 FROM python:3.12-slim-bookworm AS runtime
 
+# Pull mc (MinIO client) for artifact-init release command.
+COPY --from=minio/mc:RELEASE.2025-04-16T18-13-26Z /usr/bin/mc /usr/local/bin/mc
+
 # Create a non-root user to run the app.
 RUN useradd --create-home --uid 1001 appuser
-
 WORKDIR /app
 
 # Copy the whole built tree (venv + source) from the builder, owned by appuser.
 # uv itself is NOT copied — it's only needed to build, not to run.
 COPY --from=builder --chown=appuser:appuser /app /app
 
+# Copy artifact-init script (used as Fly release command).
+COPY --chown=appuser:appuser scripts/artifact-init.sh /app/scripts/artifact-init.sh
+RUN chmod +x /app/scripts/artifact-init.sh
+
 # Put the venv's binaries on PATH so `uvicorn` resolves without `uv run`.
 ENV PATH="/app/.venv/bin:$PATH"
 
 USER appuser
 EXPOSE 8000
-
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"
-
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
