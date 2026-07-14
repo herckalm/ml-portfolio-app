@@ -19,6 +19,8 @@
  (`project.modelId`), a "Try it live" section renders below the description,
  reusing the shared predict hook + result presenter. Projects without a
  modelId (the common case) show no demo — the field is the gate.
+ * The demo UI is routed by model id prefix: distilbert-* → text input,
+ * vit-* → image upload.
  */
 import { useState } from "react";
 import { useLocation, useNavigate, useParams, Link } from "react-router-dom";
@@ -44,7 +46,7 @@ import {
   usePublishProject,
   useDeleteProject,
 } from "@/api/projects";
-import { usePredict } from "@/api/predict";
+import { usePredict, usePredictImage } from "@/api/predict";
 import { PredictResult } from "@/components/predict/PredictResult";
 
 export default function ProjectDetail() {
@@ -52,11 +54,9 @@ export default function ProjectDetail() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Coerce the route param to a number; treat a non-numeric id as "no id".
   const parsed = idParam ? Number(idParam) : undefined;
   const id = parsed != null && !Number.isNaN(parsed) ? parsed : undefined;
 
-  // owner-context payload passed via router state (see file remarks #1).
   const state = location.state as { owned?: boolean; project?: Project } | null;
   const owned = Boolean(state?.owned);
   const passedProject = state?.project;
@@ -65,15 +65,12 @@ export default function ProjectDetail() {
   const publish = usePublishProject();
   const del = useDeleteProject();
 
-  // prefer fresh server data
   const project = data ?? passedProject;
 
   if (id === undefined) return <NotFoundView />;
   if (isLoading && !project)
     return <CenteredSpinner label="Loading project…" />;
   if (!project) {
-    // Distinguish an expected 404 (draft/missing → soft not-found) from a genuine
-    // fetch failure (→ error view). See file remarks #2.
     const realError =
       isError && !(error instanceof ApiError && error.status === 404);
     return realError ? <ErrorView /> : <NotFoundView />;
@@ -84,8 +81,6 @@ export default function ProjectDetail() {
       { id: project.id, isPublished: !project.isPublished },
       {
         onSuccess: () => {
-          // unpublishing makes this page's public view 404 on next load, so
-          // bounce the owner back to the dashboard rather than stranding them.
           if (project.isPublished) navigate("/dashboard", { replace: true });
         },
       },
@@ -214,11 +209,20 @@ export default function ProjectDetail() {
 }
 
 /**
- * Live inference demo. Rendered only when the project has a `modelId`, so the
- * hook here is always called with a valid registry key. Owns its own input and
- * mutation state; delegates result rendering to the shared `PredictResult`.
+ * Routes to the correct demo UI based on the model id prefix.
+ * distilbert-* → text input; vit-* → image upload.
  */
 function ModelDemo({ modelId }: { modelId: string }) {
+  if (modelId.startsWith("vit-")) {
+    return <ImageModelDemo modelId={modelId} />;
+  }
+  return <TextModelDemo modelId={modelId} />;
+}
+
+/**
+ * Text inference demo — NLP models.
+ */
+function TextModelDemo({ modelId }: { modelId: string }) {
   const [text, setText] = useState("");
   const predict = usePredict(modelId);
 
@@ -255,6 +259,87 @@ function ModelDemo({ modelId }: { modelId: string }) {
         disabled={predict.isPending}
         placeholder="e.g. A debt collector keeps calling me about an account I already paid off months ago…"
       />
+
+      <div className="flex items-center gap-3">
+        <Button onClick={run} disabled={!canSubmit}>
+          {predict.isPending && (
+            <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+          )}
+          Run prediction
+        </Button>
+        {predict.isPending && (
+          <span className="text-sm text-muted-foreground">Running…</span>
+        )}
+      </div>
+
+      {errorMessage && (
+        <p className="text-sm text-destructive" role="alert">
+          {errorMessage}
+        </p>
+      )}
+
+      {predict.data && <PredictResult envelope={predict.data} />}
+    </section>
+  );
+}
+
+/**
+ * Image inference demo — CV models.
+ */
+function ImageModelDemo({ modelId }: { modelId: string }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const predict = usePredictImage(modelId);
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setFile(f);
+    setPreview(URL.createObjectURL(f));
+    predict.reset();
+  };
+
+  const canSubmit = file !== null && !predict.isPending;
+
+  const run = () => {
+    if (!canSubmit) return;
+    predict.mutate(file);
+  };
+
+  const errorMessage =
+    predict.error instanceof ApiError
+      ? predict.error.message
+      : predict.isError
+        ? "Something went wrong running the model. Please try again."
+        : null;
+
+  return (
+    <section className="space-y-4 border-t border-border pt-6">
+      <div className="space-y-1">
+        <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+          <Sparkles className="h-5 w-5 text-primary" />
+          Try it live
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Upload an image and run it through the model to see a prediction.
+        </p>
+      </div>
+
+      <input
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/gif"
+        onChange={handleFile}
+        disabled={predict.isPending}
+        className="text-sm text-muted-foreground file:mr-3 file:rounded file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground hover:file:bg-primary/90"
+      />
+
+      {preview && (
+        <img
+          src={preview}
+          alt="Preview"
+          className="h-40 w-40 rounded-md object-cover border border-border"
+        />
+      )}
 
       <div className="flex items-center gap-3">
         <Button onClick={run} disabled={!canSubmit}>
