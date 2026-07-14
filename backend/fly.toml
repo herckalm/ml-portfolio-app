@@ -11,7 +11,7 @@ primary_region = 'fra'
   Jwt__Audience = 'ml-portfolio-client'
   Jwt__ExpiryHours = '24'
   Jwt__Issuer = 'ml-portfolio-api'
-  MlService__BaseUrl = 'http://ml-portfolio-ml.internal:8000'
+  MlService__BaseUrl = 'http://ml-portfolio-ml.flycast:8000'
 
 [http_service]
   internal_port = 8080

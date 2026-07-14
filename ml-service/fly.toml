@@ -8,7 +8,6 @@ primary_region = 'fra'
   MC_ALIAS_NAME = 'r2'
   ARTIFACT_BUCKET = 'ml-artifacts'
   ARTIFACT_VERSION = '1.0.0'
-  UVICORN_HOST = '::'
 
 [mounts]
   source = 'ml_artifacts'
@@ -23,7 +22,7 @@ primary_region = 'fra'
   [[http_service.checks]]
     interval = '15s'
     timeout = '5s'
-    grace_period = '30s'
+    grace_period = '120s'
     method = 'GET'
     path = '/health'
 
