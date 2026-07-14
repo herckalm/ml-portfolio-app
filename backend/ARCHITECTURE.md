@@ -1,9 +1,6 @@
 # Architecture
 
-System-level documentation for the ML Portfolio application. This document
-covers the overall shape, then goes layer by layer. The backend is documented in
-full; the frontend section captures the cross-cutting patterns and is expanded
-during the frontend documentation pass; the ML service is an early scaffold.
+System-level documentation for the ML Portfolio application. This document covers the overall shape, then goes layer by layer. The backend is documented in full; the frontend section captures the cross-cutting patterns; the ML service integration is documented in §9.
 
 ---
 
@@ -11,177 +8,114 @@ during the frontend documentation pass; the ML service is an early scaffold.
 
 The application is three services:
 
-- **Backend API** (`backend/`, ASP.NET Core + PostgreSQL) — authentication,
-  user profiles, and project CRUD. The system of record.
-- **Frontend** (`frontend/`, React + TypeScript) — the SPA users interact with;
-  renders public portfolios at `/u/{handle}` and the authenticated owner
-  dashboard.
-- **ML service** (`ml-service/`, FastAPI) — the model-inference layer. Predictor
-  #1 (DistilBERT CFPB) serves live via an object-store artifact pull, with demo
-  mode as the fallback; its integration and shape are documented in §9.
+- **Backend API** (`backend/`, ASP.NET Core + PostgreSQL) — authentication, user profiles, and project CRUD. The system of record.
+- **Frontend** (`frontend/`, React + TypeScript) — the SPA users interact with; renders public portfolios at `/u/{handle}` and the authenticated owner dashboard.
+- **ML service** (`ml-service/`, FastAPI) — the model-inference layer. Two predictors are live: DistilBERT CFPB (NLP text classification) and ViT-Tiny CIFAR-10 (CV image classification), both served via an object-store artifact pull from Cloudflare R2, with demo mode as the fallback. Integration and shape are documented in §9.
 
-The frontend talks to the backend over HTTP (JSON). The ML service's integration
-with the backend is resolved — live inference, proxied through the backend — and is
-documented in §9.
+The frontend talks to the backend over HTTP (JSON). The ML service is proxied through the backend — never called by the browser directly.
 
-```
 React (Vite + TypeScript)
-        │  HTTP / JSON
-        ▼
-ASP.NET Core 10  (API · Auth · CRUD)
-        │
-        ├──────────────▶  PostgreSQL  (via Docker Compose)
-        │
-        └──────────────▶  FastAPI  (ML inference service)
-```
+│ HTTP / JSON
+▼
+ASP.NET Core 10 (API · Auth · CRUD · Inference Proxy)
+│
+├──────────────▶ PostgreSQL (system of record)
+│
+└──────────────▶ FastAPI (ML inference service)
+▲
+artifact pull + sha256 verify (on boot)
+│
+Cloudflare R2 (object store)
 
 ---
 
 ## 2. Backend shape
 
-The backend is a layered ASP.NET Core API. A request flows inward through clear
-boundaries, each depending only on the layer beneath it:
+The backend is a layered ASP.NET Core API. A request flows inward through clear boundaries, each depending only on the layer beneath it:
 
-```
 HTTP request
-   │
-   ▼
+│
+▼
 Controllers ......... routing, status codes, JWT identity extraction
-   │  (DTOs in)
-   ▼
+│ (DTOs in)
+▼
 Services ............ business logic, authorization, entity↔DTO mapping
-   │
-   ▼
+│
+▼
 Repositories ........ data access, tracked/untracked reads, paging
-   │
-   ▼
+│
+▼
 AppDbContext (EF) ... schema source of truth
-   │
-   ▼
+│
+▼
 PostgreSQL
-```
 
-Cross-cutting concerns sit outside the request path: **configuration** binds and
-validates options at startup (§4), **middleware** wraps every response in a
-uniform error envelope (§7), and a set of **domain exceptions** carry semantic
-failure across the layers. Each backend folder has its own `README.md`; the
-sections below cover what spans them.
+Cross-cutting concerns sit outside the request path: **configuration** binds and validates options at startup (§4), **middleware** wraps every response in a uniform error envelope (§7), and a set of **domain exceptions** carry semantic failure across the layers. Each backend folder has its own `README.md`; the sections below cover what spans them.
 
 ### Folder map
 
-| Folder                | Role                                    | Docs          |
-| --------------------- | --------------------------------------- | ------------- |
-| `Domain/Entities`     | Persistent model (`User`, `Project`)    | folder README |
-| `Infrastructure/Data` | `AppDbContext` — schema source of truth | folder README |
-| `Migrations`          | Generated schema ledger                 | §6 below      |
-| `DTOs`                | API contract shapes                     | folder README |
-| `Repositories`        | Data access                             | folder README |
-| `Services`            | Business logic                          | folder README |
-| `Controllers`         | HTTP layer                              | folder README |
-| `Configuration`       | Typed, validated options                | §4 below      |
-| `Exceptions`          | Domain failure types                    | §7 below      |
-| `Middleware`          | Error envelope                          | §7 below      |
+| Folder                | Role                                        | Docs          |
+| --------------------- | ------------------------------------------- | ------------- |
+| `Domain/Entities`     | Persistent model (`User`, `Project`)        | folder README |
+| `Infrastructure/Data` | `AppDbContext` — schema source of truth     | folder README |
+| `Migrations`          | Generated schema ledger                     | §6 below      |
+| `DTOs`                | API contract shapes                         | folder README |
+| `Repositories`        | Data access                                 | folder README |
+| `Services`            | Business logic + `MlServiceClient`          | folder README |
+| `Controllers`         | HTTP layer (Auth, Projects, Users, Predict) | folder README |
+| `Configuration`       | Typed, validated options                    | §4 below      |
+| `Exceptions`          | Domain failure types                        | §7 below      |
+| `Middleware`          | Error envelope                              | §7 below      |
 
 ---
 
 ## 3. Frontend shape
 
-The frontend is a React + TypeScript SPA (Vite). It consumes the backend's HTTP
-API, validates every response against the contract before use, and renders two
-surfaces: the public portfolio at `/u/{handle}` and the authenticated owner
-dashboard. A request flows from a route component, through a data hook, through
-the transport layer, to the backend — and the response is parsed against a schema
-on the way back.
+The frontend is a React + TypeScript SPA (Vite). It consumes the backend's HTTP API, validates every response against the contract before use, and renders two surfaces: the public portfolio at `/u/{handle}` and the authenticated owner dashboard. Published projects backed by a model show a live "Try it live" demo — text input for NLP models, image upload for CV models.
 
-> **Note:** this section captures the system-level frontend shape and the
-> cross-cutting patterns. Per-folder depth (component breakdown, individual
-> hooks, routing detail) is filled in during the frontend documentation pass; the
-> folder map below is the index those READMEs hang off.
-
-Two layers sit outside this path. **`src/types`** holds the Zod schemas — the
-contract — that the transport layer parses against; they're the TS mirror of the
-backend DTOs, so a response is validated against the same shape the backend
-promised. **`src/auth`** owns the session and the login/register calls (it mints
-the token everything else depends on), kept separate from the rest of the API
-surface for that reason. Each folder has its own `README.md`; this section covers
-what spans them.
+Two layers sit outside the main request path. **`src/types`** holds the Zod schemas — the contract — that the transport layer parses against; they're the TS mirror of the backend DTOs. **`src/auth`** owns the session and the login/register calls (it mints the token everything else depends on). Each folder has its own `README.md`; this section covers what spans them.
 
 ### Folder map
 
-| Folder           | Role                                        | Docs          |
-| ---------------- | ------------------------------------------- | ------------- |
-| `src/types`      | Zod schemas + inferred types (the contract) | folder README |
-| `src/lib`        | axios transport + shared helpers            | folder README |
-| `src/api`        | TanStack Query hooks (data layer)           | folder README |
-| `src/auth`       | `AuthContext` — session + auth endpoints    | folder README |
-| `src/components` | Reusable UI (`layout`, `projects`, `ui`)    | folder README |
-| `src/pages`      | Route components (the container layer)      | folder README |
+| Folder           | Role                                                | Docs          |
+| ---------------- | --------------------------------------------------- | ------------- |
+| `src/types`      | Zod schemas + inferred types (the contract)         | folder README |
+| `src/lib`        | axios transport + shared helpers                    | folder README |
+| `src/api`        | TanStack Query hooks (data layer)                   | folder README |
+| `src/auth`       | `AuthContext` — session + auth endpoints            | folder README |
+| `src/components` | Reusable UI (`layout`, `projects`, `predict`, `ui`) | folder README |
+| `src/pages`      | Route components (the container layer)              | folder README |
 
 ### Two cross-cutting patterns
 
-Both touch the API contract, so they're worth stating at the system level (full
-treatment in `frontend/README.md`):
+- **Router-state draft-bypass.** A draft project 404s on the public GET — there's no public way to fetch one by id. So owner surfaces pass the full project object in router state, and the detail/edit pages prefer fetched data but fall back to it. This is what lets an owner view and edit their own unpublished drafts despite the public endpoint refusing them.
+- **404-as-signal.** The client reads a 404 as meaningful domain state, not just an error: a draft-or-missing project, or an unknown handle, render dedicated "not found" views, while non-404 failures fall through to a generic error view. This pairs with the backend's don't-confirm-existence stance (§8).
 
-- **Router-state draft-bypass.** A draft project 404s on the public GET — there's
-  no public way to fetch one by id. So owner surfaces pass the full project object
-  in router state, and the detail/edit pages prefer fetched data but fall back to
-  it. This is what lets an owner view and edit their own unpublished drafts
-  despite the public endpoint refusing them.
-- **404-as-signal.** The client reads a 404 as meaningful domain state, not just
-  an error: a draft-or-missing project, or an unknown handle, render dedicated
-  "not found" views, while non-404 failures fall through to a generic error view.
-  This pairs with the backend's don't-confirm-existence stance (§8) — the API
-  returns 404 for "not yours," and the client treats that 404 as a clean signal.
+### Live demo routing
+
+`ProjectDetail` renders a "Try it live" section when a project has a `modelId`. The demo UI is routed by model id prefix: `distilbert-*` → text input, `vit-*` → image upload. Adding a new model type is adding a branch in the `ModelDemo` router component.
 
 ### Contract coupling worth knowing
 
-The frontend's Zod schemas are a hand-maintained mirror of the backend DTOs, not
-generated from them. They stay slightly more lenient than the wire on purpose in
-one spot (`gitHubUrl`), and slightly stricter in another (form input validates
-before submit). The `PROJECT_DOMAINS` list and the `Domain` strings the backend
-stores must agree by hand — there's no shared source. If a DTO changes, the
-matching schema in `src/types` is the thing to update.
+The frontend's Zod schemas are a hand-maintained mirror of the backend DTOs, not generated from them. The `PROJECT_DOMAINS` list and the `Domain` strings the backend stores must agree by hand — there's no shared source. If a DTO changes, the matching schema in `src/types` is the thing to update.
 
 ### Deployment
 
-The frontend ships as a two-stage Docker image (Node build → nginx runtime); the
-same image runs under Docker Compose locally and on Fly.io in production. nginx
-serves the static build and reverse-proxies `/api` to the backend over the
-private network, which is why the SPA is same-origin in production and
-`VITE_API_BASE_URL` is left empty there. Details in `frontend/README.md`.
+The frontend ships as a two-stage Docker image (Node build → nginx runtime). nginx serves the static build and reverse-proxies `/api` to the backend over the private network, which is why `VITE_API_BASE_URL` is left empty in production. Details in `frontend/README.md`.
 
 ---
 
 ## 4. Configuration & startup
 
-`Program.cs` is the composition root and boots in two phases: register services
-and bind/validate configuration on the builder, then assemble the middleware
-pipeline on the built app. Order matters in both phases.
+`Program.cs` is the composition root and boots in two phases: register services and bind/validate configuration on the builder, then assemble the middleware pipeline on the built app. Order matters in both phases.
 
-The startup posture is **fail-fast**: a missing connection string, an absent JWT
-section, or a too-short signing secret stops the boot rather than surfacing at
-the first request. JWT options (`Configuration/JwtOptions`) bind from the `Jwt`
-config section, validate via data annotations, and are checked again with
-`ValidateOnStart()`. The bearer-auth setup additionally reads the values eagerly
-(it needs them synchronously during registration), with explicit null guards —
-this duplication is intentional and should not be "DRYed away."
+The startup posture is **fail-fast**: a missing connection string, an absent JWT section, or a too-short signing secret stops the boot rather than surfacing at the first request. JWT options (`Configuration/JwtOptions`) bind from the `Jwt` config section, validate via data annotations, and are checked again with `ValidateOnStart()`. The bearer-auth setup additionally reads the values eagerly (it needs them synchronously during registration), with explicit null guards — this duplication is intentional and should not be "DRYed away."
 
-All application services and repositories are registered **scoped** (per-request),
-matching the `DbContext` lifetime.
+All application services and repositories are registered **scoped** (per-request), matching the `DbContext` lifetime.
 
-**Per-environment notes.** Development runs plain HTTP on `:5013` (HTTPS
-redirection is skipped); the dev connection string and a development JWT secret
-come from user-secrets. CORS is locked to a single origin, the React dev server
-at `http://localhost:5173`.
+**Per-environment notes.** Development runs plain HTTP on `:5013` (HTTPS redirection is skipped); the dev connection string and a development JWT secret come from user-secrets. CORS is locked to a single origin, the React dev server at `http://localhost:5173`.
 
-### What to change before deploying
-
-Three values are environment-specific and must be set for any non-local deploy:
-
-1. **Connection string** (`DefaultConnection`) — the target database.
-2. **JWT secret / issuer / audience** — a real signing secret from a secret
-   store, not the dev value.
-3. **CORS origin** — replace `localhost:5173` with the deployed frontend origin.
+**Production (Fly.io).** Environment-specific values are injected as Fly secrets (`ConnectionStrings__DefaultConnection`, `Jwt__Secret`) and `fly.toml` env vars (`Jwt__Issuer`, `Jwt__Audience`, `MlService__BaseUrl`). The `MlService__BaseUrl` points to the ml-service's public HTTPS URL (`https://ml-portfolio-ml.fly.dev`).
 
 ---
 
@@ -189,65 +123,39 @@ Three values are environment-specific and must be set for any non-local deploy:
 
 Two entities, one relationship.
 
-- **`User`** — account + auth state + public profile. Addressed by **email**
-  (auth), **handle** (public profile), and **id** (self-service).
-- **`Project`** — owned by exactly one user; draft until published.
-- **Relationship** — `User` 1-to-many `Project`, with **cascade delete** (removing
-  a user removes their projects).
+- **`User`** — account + auth state + public profile. Addressed by **email** (auth), **handle** (public profile), and **id** (self-service).
+- **`Project`** — owned by exactly one user; draft until published. Optionally linked to a runnable model via `ModelId` (the registry key, e.g. `"distilbert-cfpb"`).
+- **Relationship** — `User` 1-to-many `Project`, with **cascade delete** (removing a user removes their projects).
 
-The schema is defined in `AppDbContext.OnModelCreating`, which is the single
-source of truth: column constraints, the unique indexes on `User.Email` and
-`User.Handle`, and the composite index on `(Project.OwnerId, Project.IsPublished)`
-that backs the public-by-handle listing.
+The schema is defined in `AppDbContext.OnModelCreating`, which is the single source of truth: column constraints, the unique indexes on `User.Email` and `User.Handle`, and the composite index on `(Project.OwnerId, Project.IsPublished)` that backs the public-by-handle listing.
 
 ### The handle-lowercasing invariant
 
-Handles are stored lowercase, and this is a **cross-layer contract** enforced in
-three places that must stay in agreement:
+Handles are stored lowercase, and this is a **cross-layer contract** enforced in three places that must stay in agreement:
 
 1. `HandleGenerator.Normalize` lowercases when deriving a handle.
 2. `AuthService` lowercases an explicitly chosen handle before persisting.
 3. `UserRepository`'s lookups normalize the query key to match.
 
-If any one of these changes, lookups silently fail to find users whose handles
-were written by a different rule. Treat it as a single invariant, not three
-independent details.
+If any one of these changes, lookups silently fail to find users whose handles were written by a different rule. Treat it as a single invariant, not three independent details.
 
 ---
 
 ## 6. Schema evolution (migrations)
 
-`Migrations/` is a generated, append-only ledger — never hand-edited. The schema
-evolved across four migrations; the narrative matters because two steps encode
-deliberate decisions that look accidental in a diff.
+`Migrations/` is a generated, append-only ledger — never hand-edited. The schema evolved across five migrations:
 
-1. **`InitialCreate` (2026-06-07)** — `Projects` table alone. No users, no
-   ownership.
-2. **`AddUsers` (2026-06-08)** — `Users` table with a unique index on `Email`.
-   The two tables coexist but aren't yet related.
-3. **`AddProjectOwnership` (2026-06-10)** — adds `Projects.OwnerId` (NOT NULL),
-   the cascade FK, and an index on `OwnerId`. This ties the model together.
-   **Deliberate detail:** the new required column is added with
-   `defaultValue: 0`. On a fresh database this is harmless (no rows to backfill);
-   on a populated one, any pre-existing project would get `OwnerId = 0`, pointing
-   at no real user. It's the standard "add a required FK to a possibly-populated
-   table" maneuver — a known tradeoff, not an oversight.
-4. **`AddHandlesProfilesAndPublishing` (2026-06-15)** — the public-portfolio
-   feature in one migration: `Handle` (unique), `DisplayName`, `Bio` on users;
-   `IsPublished` on projects. **Deliberate detail:** it drops the standalone
-   `IX_Projects_OwnerId` and replaces it with the composite
-   `IX_Projects_OwnerId_IsPublished`. The composite covers `OwnerId`-only lookups
-   as a leading-column prefix, so the standalone index was redundant — this is a
-   considered optimization, not a lost index.
+1. **`InitialCreate` (2026-06-07)** — `Projects` table alone. No users, no ownership.
+2. **`AddUsers` (2026-06-08)** — `Users` table with a unique index on `Email`. The two tables coexist but aren't yet related.
+3. **`AddProjectOwnership` (2026-06-10)** — adds `Projects.OwnerId` (NOT NULL), the cascade FK, and an index on `OwnerId`. **Deliberate detail:** the new required column is added with `defaultValue: 0`. On a fresh database this is harmless (no rows to backfill); on a populated one, any pre-existing project would get `OwnerId = 0`, pointing at no real user — a known tradeoff, not an oversight.
+4. **`AddHandlesProfilesAndPublishing` (2026-06-15)** — the public-portfolio feature in one migration: `Handle` (unique), `DisplayName`, `Bio` on users; `IsPublished` on projects. **Deliberate detail:** it drops the standalone `IX_Projects_OwnerId` and replaces it with the composite `IX_Projects_OwnerId_IsPublished`. The composite covers `OwnerId`-only lookups as a leading-column prefix, so the standalone index was redundant — a considered optimization, not a lost index.
+5. **`AddProjectModelId` (2026-07-07)** — adds `Projects.ModelId` (`varchar(100)`, nullable). The registry key of the runnable predictor backing a project (e.g. `"distilbert-cfpb"`, `"vit-cifar10"`), or `null` when the project has no live demo. Set directly in the database; not exposed through the create/update API contract by design.
 
 ---
 
 ## 7. Error handling & exceptions
 
-Errors are modeled as **domain exceptions thrown from services**, caught by a
-single `GlobalExceptionHandler` (`Middleware`) registered first in the pipeline.
-Every error response is RFC 7807 **ProblemDetails** — controllers never build
-error payloads.
+Errors are modeled as **domain exceptions thrown from services**, caught by a single `GlobalExceptionHandler` (`Middleware`) registered first in the pipeline. Every error response is RFC 7807 **ProblemDetails** — controllers never build error payloads.
 
 The mapping:
 
@@ -259,202 +167,120 @@ The mapping:
 | `ForbiddenAccessException`          | 403    | _Defined and wired, but no current path throws it_           |
 | _(anything else)_                   | 500    | Unexpected; detail logged, never returned                    |
 
-Note the 401 comes from a framework type (`UnauthorizedAccessException`), not a
-custom exception — the taxonomy is three custom types + one BCL type + the
-catch-all. `ForbiddenAccessException` is wired to 403 but currently unused;
-cross-tenant access deliberately uses `NotFoundException` instead (see §8).
+`ForbiddenAccessException` is wired to 403 but currently unused; cross-tenant access deliberately uses `NotFoundException` instead (see §8).
 
 ---
 
 ## 8. Security posture
 
-The backend takes a consistent **don't-confirm-existence** stance, implemented as
-uniform error messages across three independent surfaces:
+The backend takes a consistent **don't-confirm-existence** stance, implemented as uniform error messages across three independent surfaces:
 
 - **Login** — "Invalid credentials." for both unknown email and wrong password.
-- **Handle selection** — "That handle isn't available." for both reserved and
-  taken handles (so the reserved-word list isn't enumerable).
-- **Owner-scoped project operations** — _not found_ and _not yours_ are
-  indistinguishable; both return 404. The API never reveals whether another
-  user's project id exists. This is why `ForbiddenAccessException` goes unused.
+- **Handle selection** — "That handle isn't available." for both reserved and taken handles (so the reserved-word list isn't enumerable).
+- **Owner-scoped project operations** — _not found_ and _not yours_ are indistinguishable; both return 404. The API never reveals whether another user's project id exists. This is why `ForbiddenAccessException` goes unused.
 
 Other deliberate measures:
 
 - **Passwords** are BCrypt-hashed; plaintext is never stored or logged.
-- **JWT validation** checks issuer, audience, lifetime, and signing key on every
-  request; the signing key in the bearer setup must match the one `JwtService`
-  signs with.
-- **Caller identity** is always taken from the validated token, never from
-  request bodies or routes.
+- **JWT validation** checks issuer, audience, lifetime, and signing key on every request.
+- **Caller identity** is always taken from the validated token, never from request bodies or routes.
 
 ### Known exception to the leak-nothing rule
 
-The `/health/db` readiness probe returns the exception message in its 503 body —
-the one place an internal error detail reaches the client. It bypasses the global
-handler (it's a hand-rolled try/catch, not a thrown domain exception). Acceptable
-for a health probe behind infrastructure; revisit if these endpoints become
-publicly reachable.
+The `/health/db` readiness probe returns the exception message in its 503 body — the one place an internal error detail reaches the client. Acceptable for a health probe behind infrastructure; revisit if these endpoints become publicly reachable.
 
 ---
 
 ## 9. ML service & inference
 
-The ML service (`ml-service/`, FastAPI) is the model-inference layer. Predictor #1
-(DistilBERT CFPB) is **live** — the registry, inference route, and readiness gate
-exist, and the model serves real predictions loaded from an object-store artifact
-pull. This section records the integration boundary and the artifact-delivery
-mechanism. The shape is fixed once here because three more model projects (CV,
-clustering, generative) will plug into it; the seams below are placed so they slot
-in without a rewrite.
+The ML service (`ml-service/`, FastAPI) is the model-inference layer. Two predictors are live: DistilBERT CFPB (predictor #1, NLP) and ViT-Tiny CIFAR-10 (predictor #2, CV). This section records the integration boundary and the artifact-delivery mechanism. The shape is fixed once here because two more model projects (clustering, generative) will plug into it; the seams below are placed so they slot in without a rewrite.
 
 ### Integration boundary
 
-Inference is **live, proxied, and phased**: the browser calls the backend, and the
-backend calls the ml-service over the private network — never the browser
-directly. The §1 diagram already draws this arrow.
+Inference is **live, proxied**: the browser calls the backend, and the backend calls the ml-service via its public HTTPS URL — never the browser directly.
 
-```
-Browser ──HTTP──▶ Backend (auth · rate-limit · proxy) ──HTTP──▶ ml-service (private)
-```
+Browser ──HTTP──▶ Backend (auth · rate-limit · proxy) ──HTTPS──▶ ml-service (public URL)
 
-- **Proxied, not direct.** The backend already owns authentication and
-  rate-limiting; routing inference through it keeps one security posture instead
-  of two. A direct browser→ml-service path was rejected — it would expose an
-  unauthenticated compute endpoint to the public and split auth across two
-  surfaces.
-- **Phased.** Moving from demo stub to real model is an implementation change
-  behind a stable contract, **not** an architectural one — the proxy path, the
-  envelope, and the error contract are identical whether the response is a real
-  prediction or a demo-mode fallback. This section did not change when predictor
-  #1 landed.
-- **Readiness-gated demo mode.** The service reports `model_loaded`. When it is
-  false the service answers `503`, and the backend proxy returns a `200` body
-  marked `demo_mode` rather than surfacing the error — so the product degrades
-  gracefully to a canned response instead of breaking.
-- **Errors fold into the existing envelope.** The ml-service emits plain `422`
-  (input validation) and `503` (not ready); the backend proxy translates these
-  into the same RFC 7807 **ProblemDetails** every other endpoint returns (§7), so
-  the inference path is indistinguishable from the rest of the API to a client,
-  and the don't-confirm-existence stance (§8) is preserved.
-- **No CORS in the ml-service.** It is never browser-facing, so CORS stays owned
-  by the proxy edge — consistent with how the frontend is served same-origin (§3)
-  and how the backend scopes CORS to one origin (§4).
+- **Proxied, not direct.** The backend already owns authentication and rate-limiting; routing inference through it keeps one security posture instead of two.
+- **Readiness-gated demo mode.** The service reports `model_loaded` per predictor. When false, the service answers `503`, and the backend proxy returns a `200` body marked `demo_mode` rather than surfacing the error — so the product degrades gracefully to a canned response instead of breaking.
+- **Errors fold into the existing envelope.** The ml-service emits plain `422` (input validation), `415` (unsupported media type), and `503` (not ready); the backend proxy translates these into the same RFC 7807 ProblemDetails every other endpoint returns (§7).
+- **No CORS in the ml-service.** It is never browser-facing, so CORS stays owned by the proxy edge.
 
 ### A pluggable predictor host
 
-The ml-service is **not** "the BERT server" — it is a host that loads one or more
-**predictors** behind a stable interface and routes to them. BERT is predictor
-#1, not the shape of the service.
+The ml-service is **not** "the BERT server" — it is a host that loads one or more **predictors** behind a stable interface and routes to them.
 
-- Requests hit `POST /v1/models/{model_id}/predict`; a registry resolves
-  `model_id` to a predictor, and the result is wrapped in a uniform envelope
-  (`{ model_id, model_version, result, meta }`). The backend and frontend code
-  against the envelope; only the inner `result` varies by model.
-- The seam is a **behavioral `Protocol`** — `load` / `predict` / `health`, plus
-  `predict_stream` for streaming models — so each project supplies a predictor
-  that _behaves_ correctly without inheriting from a base class.
-- The service runs as **one container with a lazy-loading registry** now.
-  Splitting to one deployment per model later (if a model's dependencies or
-  failure modes warrant isolation) is a configuration change, not a rewrite —
-  which is the point of the registry + Protocol seam.
+- Text requests hit `POST /v1/models/{model_id}/predict`; image requests hit `POST /v1/models/{model_id}/predict-image`. A registry resolves `model_id` to a predictor, and the result is wrapped in a uniform envelope (`{ model_id, model_version, result, meta }`).
+- The seam is a **behavioral `Protocol`** — `load` / `predict` / `model_loaded`, plus `predict_stream` for streaming models — so each project supplies a predictor that _behaves_ correctly without inheriting from a base class.
+- The service runs as **one container with a lazy-loading registry**. Splitting to one deployment per model later is a configuration change, not a rewrite.
 
-The full `Predictor` Protocol and the four-project variance analysis it is
-designed against live in `ml-service/README.md`.
+The full `Predictor` Protocol and the four-project variance analysis live in `ml-service/README.md`.
 
-### Predictor #1 — the DistilBERT contract
+### Predictor #1 — DistilBERT CFPB
 
-The first model is a frozen, contract-tested artifact exported from the
-`ml-portfolio-models` repo. Three decisions are already made on the research side
-and this section honors them rather than re-deriving them:
+- **Serve ONNX.** The artifact ships as a self-contained `model.onnx`; serving it via `onnxruntime` keeps `torch`/`transformers` out of the inference path.
+- **Calibration-aware response.** The service returns `{ label, score, calibrated, confidence_band }` and the frontend renders the **band**, never a raw percentage. The calibration temperature and threshold are owned by the service (from the artifact's `calibration.json`), not the caller.
+- **Vendored input cleaning.** The model was trained on text run through a fixed cleaning contract (Unicode normalization, control-character stripping, whitespace collapse) with a `MIN_CHARS` floor. The service vendors that same cleaning — copied from the research repo, not imported.
 
-- **Serve ONNX.** The artifact ships as a self-contained `model.onnx`; serving it
-  via `onnxruntime` keeps `torch`/`transformers` out of the inference path
-  (dependencies stay `onnxruntime` + `tokenizers` + `numpy`). The TF-IDF baseline
-  statistically ties the model and is recorded as the deliberate alternative for
-  cost-sensitive serving — serving ONNX while noting the baseline is the
-  documented tradeoff, not an oversight.
-- **Calibration-aware response.** The model's confidence is trustworthy only at
-  the high end, so the service returns `{ label, score, calibrated,
-confidence_band }` and the frontend renders the **band**, never a raw
-  percentage. The calibration temperature and threshold are owned by the service
-  (from the artifact's `calibration.json`), not the caller — a low-confidence
-  prediction surfaces as "please review," not a misleading "75%".
-- **Vendored input cleaning.** The model was trained on text run through a fixed
-  cleaning contract (Unicode normalization, control-character stripping,
-  whitespace collapse) with a `MIN_CHARS` floor. The service vendors that same
-  cleaning so a visitor pasting raw text doesn't bypass it and skew the
-  distribution; inputs under the floor are rejected with `422`. The cleaning is
-  **copied** from the research repo, not imported — the two repos share no runtime
-  dependency.
+### Predictor #2 — ViT-Tiny CIFAR-10
 
-### Cross-repo artifact delivery
+- **Image input.** Accepts `multipart/form-data` uploads (`image/jpeg`, `image/png`, `image/webp`, `image/gif`). The backend `PredictController` reads the uploaded bytes and forwards them with the original content type.
+- **Preprocessing.** PIL → RGB → resize 96×96 → ToTensor → ImageNet normalization → CHW float32, matching the export contract from `ml-portfolio-models`.
+- **No calibration.** Score is raw softmax; no temperature scaling was applied to the ViT export. Result shape: `{ label, score }`.
 
-The artifact lives in `ml-portfolio-models`, is gitignored, and is ~268 MB — so it
-**never travels through git** into this repo. Delivery is an **object-store pull**,
-built into the committed stack:
+### Artifact delivery (production — Fly.io + Cloudflare R2)
 
-- **Object-store pull, built.** Compose runs a MinIO (S3-compatible) service and a
-  one-shot `mc` init container (`artifact-init`) that pulls the bundle into a
-  shared volume before ml-service boots, then verifies it with `sha256sum -c`
-  against a manifest shipped alongside the artifact. The bundle is **versioned by
-  bucket path** (`nlp/distilbert-cfpb/<version>/`, where `<version>` matches the
-  artifact's `calibration.json` `model_version`). The bucket is seeded once from
-  the local `ml-portfolio-models` export via a profile-gated `minio-seed` service,
-  and persists in a named volume. In a real deployment, MinIO is swapped for cloud
-  object storage (S3/R2) by repointing the `mc` alias and credentials — the
-  init-container pull is unchanged.
-- **Demo mode is the fallback, one layer down.** If the versioned prefix is absent
-  (nothing seeded, or the store is disabled), `artifact-init` exits cleanly having
-  written nothing; the predictor then reports `model_loaded = false` and the
-  service serves demo mode. Pull succeeds → real model; pull finds nothing → the
-  existing readiness-gated demo 200. The direct volume mount remains available for
-  local dev as an override, bypassing the pull entirely.
-- **A deliberate inversion of the §4 fail-fast posture.** The backend stops
-  booting on missing config; the ml-service does **not** stop booting on a missing
-  artifact. This looks inconsistent but is intentional: graceful degradation is
-  the whole purpose of the readiness gate, so the service is fail-fast on
-  _configuration_ and graceful-degrade on _the artifact_. A missing bundle must
-  leave the process up and reporting `model_loaded = false`.
+The model bundles live in `ml-portfolio-models`, are gitignored, and never travel through git. In production:
+
+- `scripts/entrypoint.sh` runs before uvicorn on every cold boot. It checks whether both artifact directories are already present on the persistent Fly volume (`ml_artifacts`, 3 GB) and skips the download if so.
+- On first boot, it calls `scripts/artifact-init.sh` which pulls both bundles from the **Cloudflare R2** bucket `ml-artifacts` and verifies them with `sha256sum -c` against the shipped manifests.
+- R2 credentials are injected as Fly secrets (`MC_ALIAS_URL`, `MC_ACCESS_KEY`, `MC_SECRET_KEY`).
+
+R2 bucket: ml-artifacts/
+nlp/distilbert-cfpb/1.0.0/ model.onnx config.json tokenizer.json calibration.json SHA256SUMS
+cv/vit-cifar10/1.0.0/ vit_best.onnx vit_best.onnx.data SHA256SUMS
+
+### Artifact delivery (local — Docker Compose + MinIO)
+
+Under Compose, a one-shot `artifact-init` container pulls the bundles into a shared `ml_artifacts` volume before ml-service boots. Seed the bucket once from local exports:
+
+```bash
+docker compose up -d minio
+docker compose --profile seed run --rm minio-seed
+docker compose up -d
+```
+
+The `mc` alias and credentials are the only things that differ between the MinIO (local) and R2 (production) paths — the pull-and-verify mechanism is identical.
+
+### A deliberate inversion of the §4 fail-fast posture
+
+The backend stops booting on missing config; the ml-service does **not** stop booting on a missing artifact. This looks inconsistent but is intentional: graceful degradation is the whole purpose of the readiness gate, so the service is fail-fast on _configuration_ and graceful-degrade on _the artifact_. A missing bundle must leave the process up and reporting `model_loaded = false`.
 
 ### Stateless
 
-The ml-service holds **no application data**. Prediction logging and persistence,
-if added, belong to the backend, which already owns the database, auth, and
-request context. The current scaffold's `asyncpg` dependency and `/health/db`
-probe are **template residue** copied from the backend skeleton — the backend is
-the service that legitimately owns a database readiness probe (§8) — and are
-slated for removal so the readiness story stays single-axis ("can I serve a
-prediction"), uncoupled from any database.
+The ml-service holds **no application data**. Prediction logging and persistence, if added, belong to the backend, which already owns the database, auth, and request context.
 
-### Service state today
+### Service state
 
-A conventional FastAPI layout (`app/` package, `routers/` subpackage, uv-managed
-dependencies, multi-stage Dockerfile with a non-root runtime and a liveness
-`HEALTHCHECK`). Predictor #1 is live; predictors #2–#4 remain planned. What exists
-today:
+| Concern                          | State   | Notes                                    |
+| -------------------------------- | ------- | ---------------------------------------- |
+| Liveness (`/health`)             | present | Docker + Fly healthcheck target          |
+| Readiness (`/health/ready`)      | present | per-predictor `model_loaded` gate        |
+| Text inference route             | present | `POST /v1/models/{id}/predict`           |
+| Image inference route            | present | `POST /v1/models/{id}/predict-image`     |
+| Predictor registry / Protocol    | present | core of the host                         |
+| Response envelope                | present | uniform envelope + model-specific result |
+| Input cleaning / `MIN_CHARS`     | present | vendored, `422` on violation (NLP only)  |
+| Artifact delivery                | present | R2 pull (production); MinIO pull (local) |
+| Predictor #1 — DistilBERT CFPB   | live    | calibrated NLP text classification       |
+| Predictor #2 — ViT-Tiny CIFAR-10 | live    | CV image classification                  |
+| Predictors #3–#4                 | planned | clustering, generative/streaming         |
 
-| Concern                               | State             | Notes                                            |
-| ------------------------------------- | ----------------- | ------------------------------------------------ |
-| Liveness (`/health`)                  | present           | Docker healthcheck target                        |
-| Readiness (`model_loaded`)            | present           | predictor-backed gate, per model                 |
-| Inference route                       | present           | `POST /v1/models/{id}/predict`                   |
-| Predictor registry / Protocol         | present           | core of the host                                 |
-| Response schema                       | present           | uniform envelope + calibrated result             |
-| Input cleaning / `MIN_CHARS`          | present           | vendored, `422` on violation                     |
-| Artifact delivery                     | present           | object-store pull (MinIO); volume-mount fallback |
-| Inference dependencies                | present           | `onnxruntime`, `tokenizers`, `numpy`             |
-| DB coupling (`asyncpg`, `/health/db`) | present (residue) | slated for removal                               |
-| Predictors #2–#4                      | planned           | CV, clustering, generative                       |
-
-Per-endpoint detail, the predictor contract, and setup live in
-`ml-service/README.md`.
+Per-endpoint detail, the predictor contract, and setup live in `ml-service/README.md`.
 
 ---
 
 ## 10. Open questions
 
-- **ML inference integration — resolved.** The integration boundary is settled —
-  live inference, proxied (browser → backend → ml-service) — and is documented in
-  §9.
-- **`Role` as a string.** Works today; a candidate for an enum or constants type
-  if roles multiply.
+- **Internal ml-service routing.** The backend currently reaches the ml-service via its public HTTPS URL. A private 6PN route would reduce latency and egress — blocked on Fly's handling of IPv4/IPv6 dual-stack for machine-to-machine uvicorn connections.
+- **`Role` as a string.** Works today; a candidate for an enum or constants type if roles multiply.
