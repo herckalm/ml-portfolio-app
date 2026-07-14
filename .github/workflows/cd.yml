@@ -1,0 +1,104 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+
+# Only one deploy at a time — if a second push lands while a deploy is
+# running, cancel the in-flight run and start fresh.
+concurrency:
+  group: cd-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+jobs:
+  # Mirror the same path-filter logic from CI so we only deploy what changed.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+      backend: ${{ steps.filter.outputs.backend }}
+      ml-service: ${{ steps.filter.outputs.ml-service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            frontend:
+              - 'frontend/**'
+            backend:
+              - 'backend/**'
+            ml-service:
+              - 'ml-service/**'
+
+  # Deploy ml-service first — backend depends on it via 6PN.
+  deploy-ml-service:
+    name: Deploy ml-service → Fly
+    needs: changes
+    if: ${{ needs.changes.outputs.ml-service == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy ml-service
+        working-directory: ml-service
+        run: flyctl deploy --ha=false --remote-only
+
+  # Backend deploys after ml-service (if ml-service also changed, wait for it).
+  deploy-backend:
+    name: Deploy backend → Fly
+    needs: [changes, deploy-ml-service]
+    if: |
+      always() &&
+      needs.changes.outputs.backend == 'true' &&
+      (needs.deploy-ml-service.result == 'success' || needs.deploy-ml-service.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy backend
+        working-directory: backend
+        run: flyctl deploy --ha=false --remote-only
+
+  # Frontend deploys last — it's purely static and has no service dependencies.
+  deploy-frontend:
+    name: Deploy frontend → Fly
+    needs: [changes, deploy-ml-service, deploy-backend]
+    if: |
+      always() &&
+      needs.changes.outputs.frontend == 'true' &&
+      (needs.deploy-ml-service.result == 'success' || needs.deploy-ml-service.result == 'skipped') &&
+      (needs.deploy-backend.result == 'success' || needs.deploy-backend.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy frontend
+        working-directory: frontend
+        run: flyctl deploy --ha=false --remote-only
+
+  # Aggregation gate — mirrors the CI pattern.
+  cd-success:
+    name: CD success
+    if: ${{ always() }}
+    needs: [changes, deploy-ml-service, deploy-backend, deploy-frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any deploy job failed
+        run: |
+          results="${{ needs.changes.result }} ${{ needs.deploy-ml-service.result }} ${{ needs.deploy-backend.result }} ${{ needs.deploy-frontend.result }}"
+          echo "Job results: $results"
+          for r in $results; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "A deploy job failed or was cancelled."
+              exit 1
+            fi
+          done
+          echo "All deploy jobs passed or were correctly skipped."
