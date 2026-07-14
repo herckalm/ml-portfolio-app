@@ -69,7 +69,7 @@ services:
       - |
         set -e
         mc alias set "$$MC_ALIAS_NAME" "$$MC_ALIAS_URL" "$$MC_ACCESS_KEY" "$$MC_SECRET_KEY"
-        mc mb --ignore-existing "$$MC_ALIAS_NAME/$$ARTIFACT_BUCKET"
+        mc mb --ignore-existing "$$MC_ALIAS_NAME/$$ARTIFACT_BUCKET" || true
 
         # --- NLP: distilbert-cfpb ---
         cd /src/nlp
