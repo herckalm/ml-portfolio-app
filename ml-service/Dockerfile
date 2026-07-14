@@ -44,6 +44,9 @@ RUN chmod +x /app/scripts/artifact-init.sh
 # Put the venv's binaries on PATH so `uvicorn` resolves without `uv run`.
 ENV PATH="/app/.venv/bin:$PATH"
 
+# Ensure the artifact mount point is owned by appuser (Fly volumes mount as root).
+RUN mkdir -p /app/artifacts && chown appuser:appuser /app/artifacts
+
 USER appuser
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
