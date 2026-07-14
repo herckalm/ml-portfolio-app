@@ -37,9 +37,10 @@ WORKDIR /app
 # uv itself is NOT copied — it's only needed to build, not to run.
 COPY --from=builder --chown=appuser:appuser /app /app
 
-# Copy artifact-init script (used as Fly release command).
+# Copy startup scripts.
 COPY --chown=appuser:appuser scripts/artifact-init.sh /app/scripts/artifact-init.sh
-RUN chmod +x /app/scripts/artifact-init.sh
+COPY --chown=appuser:appuser scripts/entrypoint.sh /app/scripts/entrypoint.sh
+RUN chmod +x /app/scripts/artifact-init.sh /app/scripts/entrypoint.sh
 
 # Put the venv's binaries on PATH so `uvicorn` resolves without `uv run`.
 ENV PATH="/app/.venv/bin:$PATH"
@@ -51,4 +52,4 @@ USER appuser
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["/bin/sh", "/app/scripts/entrypoint.sh"]
