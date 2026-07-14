@@ -14,4 +14,4 @@ else
   echo "Artifacts already present — skipping download."
 fi
 
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+exec /app/.venv/bin/uvicorn app.main:app --host "${UVICORN_HOST:-0.0.0.0}" --port 8000
