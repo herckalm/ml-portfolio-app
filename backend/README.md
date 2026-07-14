@@ -1,12 +1,8 @@
 # MlPortfolio API (Backend)
 
-RESTful API for **MlPortfolio**, a portfolio system for Machine Learning
-projects. It manages users and their ML projects with JWT authentication,
-ownership-based access control, and PostgreSQL persistence via Entity Framework
-Core.
+RESTful API for **MlPortfolio**, a portfolio platform for machine-learning projects. Manages users and their ML projects with JWT authentication, ownership-based access control, and PostgreSQL persistence via Entity Framework Core. Also proxies inference requests to the ML service.
 
-Built with **ASP.NET Core (.NET 10)** following a layered architecture, the
-repository pattern, and dependency injection throughout.
+Built with **ASP.NET Core (.NET 10)** following a layered architecture, the repository pattern, and dependency injection throughout.
 
 ---
 
@@ -25,45 +21,32 @@ repository pattern, and dependency injection throughout.
 
 ## Architecture at a glance
 
-A request flows inward through four layers, each depending only on the one
-beneath it:
+A request flows inward through four layers, each depending only on the one beneath it:
 
-```
-Controllers   → HTTP: routing, status codes, JWT identity extraction
-Services      → business logic, authorization, entity↔DTO mapping
-Repositories  → data access, tracked/untracked reads, paging
+Controllers → HTTP: routing, status codes, JWT identity extraction
+Services → business logic, authorization, entity↔DTO mapping
+Repositories → data access, tracked/untracked reads, paging
 Domain / Data → entities + AppDbContext (schema source of truth)
-```
 
-This separation keeps each layer single-purpose, independently testable with
-mocks, and swappable without cascading change (e.g. replacing the persistence
-layer wouldn't touch services or controllers). Cross-cutting concerns —
-configuration, the error-handling middleware, and domain exceptions — sit outside
-the request path.
-
-Each folder has its own `README.md` explaining its conventions, and the
-top-level `ARCHITECTURE.md` covers what spans the layers (schema evolution,
-security posture, the cross-layer handle invariant). **Start there for the full
-picture**; this file is the entry point and setup guide.
+Each folder has its own `README.md` explaining its conventions, and the top-level `ARCHITECTURE.md` covers what spans the layers (schema evolution, security posture, the cross-layer handle invariant). **Start there for the full picture**; this file is the entry point and setup guide.
 
 ---
 
 ## Project structure
 
-```
 backend/
-├── Controllers/        HTTP layer (Auth, Projects, Users)
-├── Services/           business logic + JwtService, HandleGenerator
-├── Repositories/       data access (interface + impl per aggregate)
-├── DTOs/               API contract shapes (+ DTOs/Common for pagination)
-├── Domain/Entities/    persistent model (User, Project)
+├── Controllers/ HTTP layer (Auth, Projects, Users, Predict)
+├── Services/ business logic + JwtService, HandleGenerator, MlServiceClient
+├── Repositories/ data access (interface + impl per aggregate)
+├── DTOs/ API contract shapes (+ DTOs/Common for pagination)
+├── Domain/Entities/ persistent model (User, Project)
 ├── Infrastructure/Data/ AppDbContext — schema source of truth
-├── Migrations/         generated schema ledger (do not hand-edit)
-├── Configuration/      typed, validated options (JwtOptions)
-├── Exceptions/         domain failure types
-├── Middleware/         GlobalExceptionHandler (RFC 7807 error envelope)
-└── Program.cs          composition root
-```
+├── Migrations/ generated schema ledger (do not hand-edit)
+├── Configuration/ typed, validated options (JwtOptions, MlServiceOptions)
+├── Exceptions/ domain failure types
+├── Middleware/ GlobalExceptionHandler (RFC 7807 error envelope)
+├── fly.toml Fly.io config (ml-portfolio-api, fra, 512 MB)
+└── Program.cs composition root
 
 ---
 
@@ -76,12 +59,10 @@ backend/
 
 ### Configuration
 
-The API reads two things from configuration that are **required at startup** —
-the app fails fast (won't boot) if either is missing or invalid:
+The API reads two things from configuration that are **required at startup** — the app fails fast (won't boot) if either is missing or invalid:
 
 1. **`ConnectionStrings:DefaultConnection`** — the PostgreSQL connection string.
-2. **The `Jwt` section** — `Secret` (≥ 32 chars for HMAC-SHA256), `Issuer`,
-   `Audience`, and optional `ExpiryHours` (1–720, default 24).
+2. **The `Jwt` section** — `Secret` (≥ 32 chars for HMAC-SHA256), `Issuer`, `Audience`, and optional `ExpiryHours` (1–720, default 24).
 
 In **development**, these come from .NET user-secrets rather than tracked files:
 
@@ -92,8 +73,7 @@ dotnet user-secrets set "Jwt:Issuer"   "MlPortfolio"
 dotnet user-secrets set "Jwt:Audience" "MlPortfolioClient"
 ```
 
-`appsettings.Development.json` holds only placeholders — no real secrets are
-committed.
+`appsettings.Development.json` holds only placeholders — no real secrets are committed.
 
 ### Database setup
 
@@ -109,9 +89,7 @@ dotnet ef database update
 dotnet run
 ```
 
-The API binds to **`http://localhost:5013`** in development (plain HTTP; HTTPS
-redirection is enabled only outside development). Swagger UI is available in
-development for exploring the endpoints.
+The API binds to **`http://localhost:5013`** in development. Swagger UI is available in development for exploring the endpoints.
 
 ---
 
@@ -144,6 +122,15 @@ development for exploring the endpoints.
 | PUT    | `/api/users/me`                | JWT    | Update own profile                    |
 | DELETE | `/api/users/me`                | JWT    | Hard-delete own account               |
 
+### Inference proxy (`/api/predict`) — public
+
+| Method | Endpoint                       | Description                                                             |
+| ------ | ------------------------------ | ----------------------------------------------------------------------- |
+| POST   | `/api/predict/{modelId}`       | Proxies text inference to the ml-service; degrades to demo mode on 503  |
+| POST   | `/api/predict/{modelId}/image` | Proxies image inference to the ml-service; degrades to demo mode on 503 |
+
+The predict endpoints are public (no auth) — they are the demo surface for published portfolio projects. On ml-service `503` (model not loaded), the backend returns a `200` demo-mode envelope (`meta.demo_mode = true`) so the UI degrades gracefully rather than erroring.
+
 ### Health
 
 | Endpoint     | Description                         |
@@ -151,66 +138,44 @@ development for exploring the endpoints.
 | `/health`    | Liveness — the process is up        |
 | `/health/db` | Readiness — PostgreSQL is reachable |
 
-The health endpoints support container orchestration liveness/readiness probes.
-
 ---
 
 ## Key design decisions
 
-**Layered + repository pattern.** Controllers stay thin (HTTP only); services own
-all business logic and authorization; repositories abstract data access behind
-interfaces, so services depend on `IUserRepository` / `IProjectRepository` rather
-than concrete classes — testable with mocks, swappable without business-logic
-change.
+**Layered + repository pattern.** Controllers stay thin (HTTP only); services own all business logic and authorization; repositories abstract data access behind interfaces, so services depend on `IUserRepository` / `IProjectRepository` rather than concrete classes — testable with mocks, swappable without business-logic change.
 
-**Authorization lives in the service layer**, not controllers. If a second entry
-path is ever added (background job, gRPC), the ownership rules apply automatically.
-Owner-scoped operations treat _not found_ and _not owned_ identically — both
-return **404** — so the API never reveals whether another user's resource exists.
+**Authorization lives in the service layer**, not controllers. Owner-scoped operations treat _not found_ and _not owned_ identically — both return **404** — so the API never reveals whether another user's resource exists.
 
-**Centralized error handling.** Services throw domain exceptions
-(`NotFoundException` → 404, `ConflictException` → 409,
-`ForbiddenAccessException` → 403, `UnauthorizedAccessException` → 401); a single
-`GlobalExceptionHandler` translates them into RFC 7807 ProblemDetails responses.
-Controllers contain no try/catch. (`ForbiddenAccessException` is wired but
-currently unused — see `ARCHITECTURE.md`.)
+**Centralized error handling.** Services throw domain exceptions (`NotFoundException` → 404, `ConflictException` → 409, `ForbiddenAccessException` → 403, `UnauthorizedAccessException` → 401); a single `GlobalExceptionHandler` translates them into RFC 7807 ProblemDetails responses. Controllers contain no try/catch.
 
-**Security by design.** Passwords are BCrypt-hashed (adaptive cost, built-in
-salt, timing-safe verify). JWT validation checks issuer, audience, lifetime, and
-signing key on every request. Caller identity always comes from the validated
-token, never request bodies. Error messages are deliberately uniform so they
-don't confirm which accounts, handles, or resources exist.
+**Security by design.** Passwords are BCrypt-hashed. JWT validation checks issuer, audience, lifetime, and signing key on every request. Caller identity always comes from the validated token, never request bodies. Error messages are deliberately uniform so they don't confirm which accounts, handles, or resources exist.
 
-**Fail-fast startup.** JWT options bind, validate via data annotations, and run
-`ValidateOnStart()`; a missing connection string or JWT secret stops the boot
-rather than failing at the first request.
+**Fail-fast startup.** JWT options bind, validate via data annotations, and run `ValidateOnStart()`; a missing connection string or JWT secret stops the boot rather than failing at the first request.
 
-**Scoped DI lifetimes.** All services and repositories are registered scoped
-(per-request), matching the `DbContext` lifetime — avoids the concurrency issues
-a singleton would cause and the overhead a transient would add.
+**Inference proxy with graceful degradation.** The `PredictController` is a thin proxy to the ml-service via `IMlServiceClient` (typed `HttpClient`). A `503` from the ml-service (model not loaded) is caught and converted to a `200` demo-mode response — product policy kept deliberately out of the transport layer.
 
-**Pagination.** List endpoints return a `PagedResult<T>` (items + total + page +
-size); `PaginationQuery` caps page size at 50.
+**Pagination.** List endpoints return a `PagedResult<T>` (items + total + page + size); `PaginationQuery` caps page size at 50.
 
 ---
 
-## What to change before deploying
+## Deployment (Fly.io)
 
-Three values are environment-specific and must be set for any non-local deploy:
+The backend is deployed as `ml-portfolio-api` on Fly.io (region `fra`). Fly secrets hold the database connection string and JWT secret. The `ml-service` is reached via its public URL (`https://ml-portfolio-ml.fly.dev`), set via `MlService__BaseUrl`.
 
-1. **Connection string** — point at the production database.
-2. **JWT `Secret` / `Issuer` / `Audience`** — a real secret from a secret store,
-   not the development value.
-3. **CORS origin** — `Program.cs` currently allows only the React dev server
-   (`http://localhost:5173`); replace it with the deployed frontend origin.
+EF Core migrations are applied manually via SSH when a new migration is added:
+
+```bash
+fly ssh console --app ml-portfolio-api
+/app/efbundle --connection "$ConnectionStrings__DefaultConnection"
+```
+
+The Dockerfile produces a self-contained EF migration bundle (`efbundle`) alongside the runtime image for this purpose.
 
 ---
 
 ## Future work
 
-- **Refresh tokens** — pair a short-lived access token with a refresh token
-  instead of a single long-lived JWT.
-- **Rate limiting** — `POST /api/auth/login` has none; .NET 10's built-in
-  `AddRateLimiter` would mitigate brute-force.
-- **Unit tests** — every layer depends on interfaces, so the codebase is ready
-  for mock-based testing; the tests themselves remain to be written.
+- **Refresh tokens** — pair a short-lived access token with a refresh token instead of a single long-lived JWT.
+- **Rate limiting** — `POST /api/auth/login` has none; .NET 10's built-in `AddRateLimiter` would mitigate brute-force.
+- **Unit tests** — every layer depends on interfaces, so the codebase is ready for mock-based testing; the tests themselves remain to be written.
+- **Internal ml-service routing** — currently the backend reaches the ml-service via its public HTTPS URL; a private network route (once IPv6 dual-stack is supported) would reduce latency and egress.
