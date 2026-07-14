@@ -13,13 +13,6 @@ primary_region = 'fra'
   source = 'ml_artifacts'
   destination = '/app/artifacts'
 
-[[services]]
-  internal_port = 8000
-  protocol = "tcp"
-  
-[[services.ports]]
-    port = 8000
-
 [http_service]
   internal_port = 8000
   force_https = true
