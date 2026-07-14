@@ -11,7 +11,7 @@ import { useAuth } from "@/auth/AuthContext";
 export function Navbar() {
   // Reactive: useAuth() re-renders this on login/logout, so the navbar flips
   // instantly — no full-page reload needed to swap the action set.
-  const { isAuthed, logout } = useAuth();
+  const { isAuthed, user, logout } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -31,13 +31,15 @@ export function Navbar() {
         </Link>
 
         <div className="flex items-center gap-1">
-          {/* Public — always visible */}
-          <Button asChild variant="ghost" size="sm">
-            <Link to="/predict" className="flex items-center gap-1.5">
-              <Sparkles className="h-4 w-4 text-primary" />
-              Live demo
-            </Link>
-          </Button>
+          {/* Owner-only standalone demo page */}
+          {user?.email === "kalamasira@gmail.com" && (
+            <Button asChild variant="ghost" size="sm">
+              <Link to="/predict" className="flex items-center gap-1.5">
+                <Sparkles className="h-4 w-4 text-primary" />
+                Live demo
+              </Link>
+            </Button>
+          )}
 
           {isAuthed ? (
             <>
