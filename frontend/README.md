@@ -206,3 +206,4 @@ Compose locally and on Fly.io in production.
 ESLint is configured in `eslint.config.js`. For stricter, type-aware lint rules
 (`recommendedTypeChecked` / `strictTypeChecked`) and React-specific plugins, see
 the Vite React-TS template guidance the original README linked.
+
