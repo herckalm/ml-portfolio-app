@@ -42,10 +42,12 @@ services:
       timeout: 5s
       retries: 5
 
-  # One-shot seeder (manual, profile-gated). Seeds NLP and CV bundles into
+# One-shot seeder (manual, profile-gated). Seeds NLP and CV bundles into
   # the bucket with SHA256SUMS manifests for each model. Only serving files
   # are shipped — model.safetensors is deliberately NOT included.
-  # Run explicitly with: docker compose --profile seed run --rm minio-seed
+  # Local MinIO:  docker compose --profile seed run --rm minio-seed
+  # Remote R2:    MC_ALIAS_NAME=r2 MC_ALIAS_URL=<endpoint> MC_ACCESS_KEY=<id> MC_SECRET_KEY=<secret> \
+  #               docker compose --profile seed run --rm minio-seed
   minio-seed:
     image: minio/mc:RELEASE.2025-04-16T18-13-26Z
     profiles: ["seed"]
@@ -53,8 +55,10 @@ services:
       minio:
         condition: service_healthy
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MC_ALIAS_NAME: ${MC_ALIAS_NAME:-local}
+      MC_ALIAS_URL: ${MC_ALIAS_URL:-http://minio:9000}
+      MC_ACCESS_KEY: ${MC_ACCESS_KEY:-${MINIO_ROOT_USER}}
+      MC_SECRET_KEY: ${MC_SECRET_KEY:-${MINIO_ROOT_PASSWORD}}
       ARTIFACT_BUCKET: ${ARTIFACT_BUCKET}
       ARTIFACT_VERSION: ${ARTIFACT_VERSION}
     volumes:
@@ -64,19 +68,19 @@ services:
     command:
       - |
         set -e
-        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
-        mc mb --ignore-existing "local/$$ARTIFACT_BUCKET"
+        mc alias set "$$MC_ALIAS_NAME" "$$MC_ALIAS_URL" "$$MC_ACCESS_KEY" "$$MC_SECRET_KEY"
+        mc mb --ignore-existing "$$MC_ALIAS_NAME/$$ARTIFACT_BUCKET"
 
         # --- NLP: distilbert-cfpb ---
         cd /src/nlp
         sha256sum model.onnx config.json tokenizer.json calibration.json > /tmp/SHA256SUMS
-        NLP_DEST="local/$$ARTIFACT_BUCKET/nlp/distilbert-cfpb/$$ARTIFACT_VERSION/"
+        NLP_DEST="$$MC_ALIAS_NAME/$$ARTIFACT_BUCKET/nlp/distilbert-cfpb/$$ARTIFACT_VERSION/"
         mc cp model.onnx config.json tokenizer.json calibration.json /tmp/SHA256SUMS "$$NLP_DEST"
         echo "seeded $$NLP_DEST"
 
         # --- CV: vit-cifar10 ---
         cd /src/cv
-        CV_DEST="local/$$ARTIFACT_BUCKET/cv/vit-cifar10/$$ARTIFACT_VERSION/"
+        CV_DEST="$$MC_ALIAS_NAME/$$ARTIFACT_BUCKET/cv/vit-cifar10/$$ARTIFACT_VERSION/"
         if [ -f vit_best.onnx.data ]; then
           sha256sum vit_best.onnx vit_best.onnx.data > /tmp/SHA256SUMS
           mc cp vit_best.onnx vit_best.onnx.data /tmp/SHA256SUMS "$$CV_DEST"
