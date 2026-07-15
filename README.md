@@ -2,6 +2,8 @@
 
 > A multi-tenant platform where machine-learning practitioners build, manage, and publicly share their project portfolios — with a live inference service behind it.
 
+This project is a deliberate MLOps learning artifact, built in parallel with a Master's in Artificial Intelligence. The goal was to go beyond isolated model training and build a production-shaped system end-to-end — from experiment tracking and ONNX export, through artifact delivery and live inference, to a deployed full-stack application. Every architectural decision was made with that pipeline story in mind.
+
 Each user gets a private dashboard to manage their work and a public, shareable page (e.g. `/u/your-handle`) they can hand to a recruiter — no login required to view. Published projects can be backed by a real model: the platform ships with two working predictors served from a dedicated inference service.
 
 > **Status:** deployed and live on Fly.io — graduation project for the AUEB Coding Factory, built as a full-stack MLOps showcase. Both NLP and CV predictors are live end-to-end. See the [Roadmap](#roadmap).

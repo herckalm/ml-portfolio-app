@@ -34,6 +34,12 @@ type ProjectCardProps = {
    * would 404 on an unpublished project. See ProjectDetail for the consuming side.
    */
   owned?: boolean;
+  /**
+   * Optional back-navigation target passed through router state to ProjectDetail.
+   * When set, the detail page's Back button returns here instead of "/".
+   * Typically the public profile URL (e.g. "/u/iraklis").
+   */
+  backTo?: string;
   /** Optional footer actions (publish toggle, edit, delete), injected by parent. */
   actions?: ReactNode;
 };
@@ -42,6 +48,7 @@ export function ProjectCard({
   project,
   showStatus = false,
   owned = false,
+  backTo,
   actions,
 }: ProjectCardProps) {
   return (
@@ -51,7 +58,13 @@ export function ProjectCard({
           <CardTitle className="leading-snug">
             <Link
               to={`/projects/${project.id}`}
-              state={owned ? { owned: true, project } : undefined}
+              state={
+                owned
+                  ? { owned: true, project, backTo }
+                  : backTo
+                    ? { backTo }
+                    : undefined
+              }
               className="underline-offset-4 hover:text-primary hover:underline"
             >
               {project.title}
@@ -76,7 +89,7 @@ export function ProjectCard({
             href={project.gitHubUrl}
             target="_blank"
             rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()} // don't trigger the card's title link
+            onClick={(e) => e.stopPropagation()}
             className="inline-flex items-center gap-1 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
             aria-label={`View source code for ${project.title}`}
           >

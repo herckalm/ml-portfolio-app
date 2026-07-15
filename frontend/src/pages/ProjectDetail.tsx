@@ -57,7 +57,11 @@ export default function ProjectDetail() {
   const parsed = idParam ? Number(idParam) : undefined;
   const id = parsed != null && !Number.isNaN(parsed) ? parsed : undefined;
 
-  const state = location.state as { owned?: boolean; project?: Project } | null;
+  const state = location.state as {
+    owned?: boolean;
+    project?: Project;
+    backTo?: string;
+  } | null;
   const owned = Boolean(state?.owned);
   const passedProject = state?.project;
 
@@ -91,7 +95,7 @@ export default function ProjectDetail() {
   return (
     <article className="mx-auto max-w-3xl space-y-6">
       <Button asChild variant="ghost" size="sm" className="-ml-2">
-        <Link to="/">
+        <Link to={state?.backTo ?? "/"}>
           <ArrowLeft className="mr-1.5 h-4 w-4" />
           Back
         </Link>
