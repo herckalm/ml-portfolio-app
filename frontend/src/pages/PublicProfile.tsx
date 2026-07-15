@@ -80,6 +80,7 @@ export default function PublicProfile() {
         isLoading={projects.isLoading}
         isError={projects.isError}
         owned={owned}
+        backTo={handle ? `/u/${handle}` : undefined}
         emptyMessage={`${profile.data?.displayName ?? "This user"} hasn't published any projects yet.`}
       />
     </div>
