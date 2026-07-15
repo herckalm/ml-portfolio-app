@@ -37,6 +37,11 @@ type ProjectGalleryProps = {
   emptyMessage?: string;
   showStatus?: boolean;
   owned?: boolean;
+  /**
+   * When set, passed through to each ProjectCard so ProjectDetail's Back button
+   * returns here instead of "/". Typically the public profile URL (e.g. "/u/iraklis").
+   */
+  backTo?: string;
   renderActions?: (project: Project) => ReactNode;
 };
 
@@ -52,6 +57,7 @@ export function ProjectGallery({
   emptyMessage = "No projects yet.",
   showStatus = false,
   owned = false,
+  backTo,
   renderActions,
 }: ProjectGalleryProps) {
   const [domain, setDomain] = useState<DomainFilter>("all");
@@ -98,6 +104,7 @@ export function ProjectGallery({
                 project={project}
                 showStatus={showStatus}
                 owned={owned}
+                backTo={backTo}
                 actions={renderActions?.(project)}
               />
             ))}
