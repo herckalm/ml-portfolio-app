@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from app.predictors import Predictor
 from app.predictors.distilbert import DistilBertPredictor

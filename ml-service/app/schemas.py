@@ -8,7 +8,6 @@ Two layers:
 """
 
 from enum import Enum
-from typing import Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -87,7 +86,7 @@ class ImageClassificationResult(BaseModel):
 
 
 # union of all per-model result shapes. Extend as predictors are added.
-PredictionResult = Union[ClassificationResult, ImageClassificationResult]
+PredictionResult = ClassificationResult | ImageClassificationResult
 
 
 # uniform response envelope

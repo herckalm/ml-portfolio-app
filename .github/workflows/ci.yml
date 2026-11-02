@@ -104,7 +104,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked
-      - run: uvx ruff check .
+      - run: uvx ruff@0.17.3 check .
       - run: uv run pytest
 
   # 4b) Backend integration: boot the real compose stack, run the smoke test.

@@ -26,8 +26,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # runtime: just Python + the built venv + source
 FROM python:3.12-slim-bookworm AS runtime
 
-# Pull mc (MinIO client) for artifact-init release command.
-COPY --from=minio/mc:RELEASE.2025-04-16T18-13-26Z /usr/bin/mc /usr/local/bin/mc
+# Pull mc (MinIO client) for artifact-init release command. Upstream minio/mc
+# was removed from Docker Hub, so this uses the maintained pgsty fork.
+COPY --from=pgsty/mc:RELEASE.2026-10-26T00-00-00Z /usr/bin/mc /usr/local/bin/mc
 
 # Create a non-root user to run the app.
 RUN useradd --create-home --uid 1001 appuser
