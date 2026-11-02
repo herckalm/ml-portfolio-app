@@ -24,7 +24,7 @@ services:
   # is `mc ready local` (the image dropped curl). Tag is pinned, not `latest`,
   # per the artifact-delivery contract.
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     container_name: ml_portfolio_minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -49,7 +49,7 @@ services:
   # Remote R2:    MC_ALIAS_NAME=r2 MC_ALIAS_URL=<endpoint> MC_ACCESS_KEY=<id> MC_SECRET_KEY=<secret> \
   #               docker compose --profile seed run --rm minio-seed
   minio-seed:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    image: pgsty/mc:RELEASE.2026-10-26T00-00-00Z
     profiles: ["seed"]
     depends_on:
       minio:
@@ -96,7 +96,7 @@ services:
   # versioned prefix is absent (nothing seeded), it logs and exits 0 so
   # ml-service degrades to demo mode.
   artifact-init:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    image: pgsty/mc:RELEASE.2026-10-26T00-00-00Z
     depends_on:
       minio:
         condition: service_healthy
