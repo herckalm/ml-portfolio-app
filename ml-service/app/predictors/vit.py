@@ -163,9 +163,7 @@ class ViTPredictor:
     @staticmethod
     def _preprocess(image: object) -> np.ndarray:
         """PIL Image → normalised CHW float32 array with batch dim."""
-        from PIL import Image
-
-        img = image if isinstance(image, Image.Image) else image  # type: ignore[redundant-expr]
+        img = image
         img = img.resize((_IMAGE_SIZE, _IMAGE_SIZE))  # type: ignore[union-attr]
 
         arr = np.asarray(img, dtype=np.float32) / 255.0  # HWC [0,1]
