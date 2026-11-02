@@ -9,7 +9,9 @@ primary_region = 'fra'   # same region as the backend → fast 6PN hop
 # RESOLVER must be bracketed — it's Fly's internal IPv6 DNS server.
 [env]
   RESOLVER = '[fdaa::3]'
-  BACKEND_UPSTREAM = 'http://ml-portfolio-api.internal:8080'
+  # .flycast (not .internal) so requests go through Fly Proxy, which wakes a
+  # suspended api machine. Port 80 is the proxy's http port, not the app's 8080.
+  BACKEND_UPSTREAM = 'http://ml-portfolio-api.flycast'
 
 [http_service]
   internal_port = 80          # nginx listens on 80 inside the container

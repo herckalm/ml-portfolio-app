@@ -16,7 +16,7 @@ server {
     # Reverse-proxy /api to the backend. RESOLVER and BACKEND_UPSTREAM are
     # injected per-environment by envsubst at container start:
     #   compose → 127.0.0.11        / http://backend:8080
-    #   fly     → [fdaa::3]         / http://ml-portfolio-api.internal:8080
+    #   fly     → [fdaa::3]         / http://ml-portfolio-api.flycast
     location /api/ {
         resolver ${RESOLVER} valid=10s;
         set $backend_upstream ${BACKEND_UPSTREAM};

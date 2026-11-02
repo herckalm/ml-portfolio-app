@@ -15,10 +15,15 @@ primary_region = 'fra'
 
 [http_service]
   internal_port = 8080
-  force_https = true
-  auto_stop_machines = 'off'
+  # force_https is off because the frontend's nginx reaches the api over plain
+  # HTTP on Flycast (private network); with it on, Fly Proxy answers that with a
+  # 301 to https://*.flycast, which has no TLS. Browsers never call the api
+  # directly: they hit ml-portfolio-web over HTTPS, which proxies /api/.
+  force_https = false
+  # Sleep when idle; Fly Proxy wakes it on the next request (via Flycast).
+  auto_stop_machines = 'suspend'
   auto_start_machines = true
-  min_machines_running = 1
+  min_machines_running = 0
   [[http_service.checks]]
     interval = '15s'
     timeout = '3s'
